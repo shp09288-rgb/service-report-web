@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Bash(mkdir -p /tmp/zip_inspect)",
+      "Read(//tmp/**)",
+      "Bash(unzip -o \"C:\\\\\\\\Users\\\\\\\\shp09\\\\\\\\Documents\\\\\\\\Service-Report-Web-rev01\\\\\\\\references\\\\\\\\release-note-web_DBTool_source_Final.zip\")",
+      "Bash(extract-text \"C:\\\\Users\\\\shp09\\\\Documents\\\\Service-Report-Web-rev01\\\\references\\\\Park Systems Field Service Passdown Report.xlsx\")",
+      "Bash(python3 -c ' *)",
+      "Bash(unzip -l \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Field Service Passdown Report.xlsx\")",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Field Service Passdown Report.xlsx\" \"xl/worksheets/sheet1.xml\" -d temp_fs)",
+      "Bash(xargs ls *)",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Field Service Passdown Report.xlsx\" \"xl/sharedStrings.xml\" -d temp_fs)",
+      "Bash(unzip -l \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Installation Passdown Report.xlsx\")",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Installation Passdown Report.xlsx\" \"xl/sharedStrings.xml\" -d temp_inst)",
+      "Bash(unzip -l \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Gantt Chart.xlsx\")",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Gantt Chart.xlsx\" \"xl/workbook.xml\" -d temp_gantt)",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Gantt Chart.xlsx\" \"xl/sharedStrings.xml\" -d temp_gantt)",
+      "Bash(rm -rf temp_*)",
+      "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Field Service Passdown Report.xlsx\" xl/worksheets/sheet1.xml -d fs_temp)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npx next *)"
+    ]
+  }
+}
