@@ -22,9 +22,13 @@ interface Props {
   content: FieldServiceContent
   onChange: (content: FieldServiceContent) => void
   readOnly?: boolean
+  cardSeeded?: boolean
 }
 
-export function FieldServiceEditor({ content, onChange, readOnly = false }: Props) {
+export function FieldServiceEditor({ content, onChange, readOnly = false, cardSeeded = false }: Props) {
+  // Fields that are locked when the document was created from card master data.
+  // Only honour the explicit flag — never infer from field values.
+  const metaReadOnly = readOnly || cardSeeded
   function set<K extends keyof FieldServiceContent>(key: K, value: FieldServiceContent[K]) {
     onChange({ ...content, [key]: value })
   }
@@ -108,12 +112,12 @@ export function FieldServiceEditor({ content, onChange, readOnly = false }: Prop
         <div className={label}>Customer</div>
         <div className="border border-gray-300 p-1">
           <input type="text" className={input} value={content.customer}
-            onChange={e => set('customer', e.target.value)} disabled={readOnly} />
+            onChange={e => set('customer', e.target.value)} disabled={metaReadOnly} />
         </div>
         <div className={label}>Location</div>
         <div className="border border-gray-300 p-1">
           <input type="text" className={input} value={content.location}
-            onChange={e => set('location', e.target.value)} disabled={readOnly} />
+            onChange={e => set('location', e.target.value)} disabled={metaReadOnly} />
         </div>
 
         <div className={label}>CRM Case ID</div>
@@ -124,7 +128,7 @@ export function FieldServiceEditor({ content, onChange, readOnly = false }: Prop
         <div className={label}>Model</div>
         <div className="border border-gray-300 p-1">
           <input type="text" className={input} value={content.model}
-            onChange={e => set('model', e.target.value)} disabled={readOnly} />
+            onChange={e => set('model', e.target.value)} disabled={metaReadOnly} />
         </div>
 
         <div className={label}>Site Survey</div>
@@ -155,7 +159,7 @@ export function FieldServiceEditor({ content, onChange, readOnly = false }: Prop
         <div className={label}>SID</div>
         <div className="border border-gray-300 p-1">
           <input type="text" className={input} value={content.sid}
-            onChange={e => set('sid', e.target.value)} disabled={readOnly} />
+            onChange={e => set('sid', e.target.value)} disabled={metaReadOnly} />
         </div>
 
         <div className={label}>Tel #</div>
@@ -166,7 +170,7 @@ export function FieldServiceEditor({ content, onChange, readOnly = false }: Prop
         <div className={label}>EQ ID</div>
         <div className="border border-gray-300 p-1">
           <input type="text" className={input} value={content.eq_id}
-            onChange={e => set('eq_id', e.target.value)} disabled={readOnly} />
+            onChange={e => set('eq_id', e.target.value)} disabled={metaReadOnly} />
         </div>
 
         <div className={label}>Email</div>

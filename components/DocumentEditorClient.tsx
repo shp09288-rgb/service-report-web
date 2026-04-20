@@ -52,24 +52,55 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
-  // ── Auto-save ────────────────────────────────────────────────
+  // ── Dirty tracking + lock-lost state ────────────────────────
   const [saveEnabled, setSaveEnabled] = useState(false)
-  // Only save when this user holds the lock
-  const saveStatus = useAutoSave(content, docId, saveEnabled && !readOnly)
+  const [isDirty, setIsDirty]         = useState(false)
+  const [lockLost, setLockLost]       = useState(false)
+
+  // ── Auto-save (only when lock is held and not lost) ──────────
+  const saveStatus = useAutoSave(content, docId, saveEnabled && !readOnly && !lockLost, {
+    lockedBy:   displayName ?? undefined,
+    onLockLost: () => setLockLost(true),
+  })
+
+  // ── Clear isDirty on successful save ─────────────────────────
+  useEffect(() => {
+    if (saveStatus === 'saved') setIsDirty(false)
+  }, [saveStatus])
+
+  // ── beforeunload guard ───────────────────────────────────────
+  useEffect(() => {
+    if (!isDirty) return
+    function handler(e: BeforeUnloadEvent) {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   // ── Sync ─────────────────────────────────────────────────────
-  const [syncing, setSyncing]           = useState(false)
-  const [syncedDocId, setSyncedDocId]   = useState<string | null>(null)
-  const [syncError, setSyncError]       = useState('')
+  const [syncing, setSyncing]         = useState(false)
+  const [syncedDocId, setSyncedDocId] = useState<string | null>(null)
+  const [syncError, setSyncError]     = useState('')
+
+  // Auto-clear sync success banner after 5 seconds
+  useEffect(() => {
+    if (!syncedDocId) return
+    const t = setTimeout(() => setSyncedDocId(null), 5000)
+    return () => clearTimeout(t)
+  }, [syncedDocId])
 
   // ── Export ───────────────────────────────────────────────────
-  const [exporting, setExporting]       = useState(false)
-  const [exportError, setExportError]   = useState('')
+  const [exporting, setExporting]   = useState(false)
+  const [exportError, setExportError] = useState('')
 
+  // ── Load document + card ─────────────────────────────────────
   useEffect(() => {
     setLoading(true)
     setLoadError('')
     setSaveEnabled(false)
+    setIsDirty(false)
+    setLockLost(false)
 
     Promise.all([
       fetch(`/api/documents/${docId}`),
@@ -93,6 +124,7 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
   function handleChange(next: Content) {
     setContent(next)
     setSaveEnabled(true)
+    setIsDirty(true)
   }
 
   async function handleExport() {
@@ -110,12 +142,12 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         setExportError(body.error ?? 'Export failed.')
         return
       }
-      const blob = await res.blob()
-      const url  = URL.createObjectURL(blob)
-      const a    = document.createElement('a')
-      a.href     = url
-      const prefix = card?.type === 'installation' ? 'installation' : 'field-service'
-      a.download = `${prefix}-${doc.report_date}.docx`
+      const blob   = await res.blob()
+      const url    = URL.createObjectURL(blob)
+      const prefix = card.type === 'installation' ? 'installation' : 'field-service'
+      const a      = document.createElement('a')
+      a.href       = url
+      a.download   = `${prefix}-${doc.report_date}.docx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -132,7 +164,11 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
     setSyncError('')
     setSyncedDocId(null)
     try {
-      const res = await fetch(`/api/documents/${docId}/sync`, { method: 'POST' })
+      const res = await fetch(`/api/documents/${docId}/sync`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ lockedBy: displayName }),
+      })
       if (!res.ok) {
         const body = await res.json()
         setSyncError(body.error ?? 'Sync failed.')
@@ -149,10 +185,12 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
 
   // ── Render ───────────────────────────────────────────────────
 
-  // Wait for localStorage read to finish (avoids hydration mismatch)
-  if (!ready) return null
+  // Show loading state while reading localStorage (prevents hydration flash)
+  if (!ready) {
+    return <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
+  }
 
-  // Username prompt — must enter name before editing
+  // Username / identity prompt
   if (!userName) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -212,17 +250,17 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
   }
 
   // ── Main editor view ─────────────────────────────────────────
-
   return (
     <div className="space-y-3">
 
       {/* Lock banner — shown when another user holds the lock */}
       {lockState.status === 'denied' && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3">
-          <span className="text-base">🔒</span>
+          <span>🔒</span>
           <span>
             Currently being edited by <strong>{lockState.lockedBy}</strong>.
-            You are in <strong>read-only</strong> mode.
+            You are in <strong>read-only</strong> mode. Editing access will be
+            checked automatically when the lock expires.
           </span>
         </div>
       )}
@@ -233,7 +271,23 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         </div>
       )}
 
-      {/* Sync success banner */}
+      {/* Lock-lost banner — save was rejected server-side */}
+      {lockLost && (
+        <div className="flex items-center justify-between bg-red-50 border border-red-200 text-red-800 text-sm rounded-lg px-4 py-3">
+          <span>
+            Your editing lock was lost — unsaved changes were not saved.
+            Reload the page to re-acquire the lock and continue editing.
+          </span>
+          <button
+            onClick={() => window.location.reload()}
+            className="ml-4 shrink-0 text-xs font-medium border border-red-300 rounded px-3 py-1.5 hover:bg-red-100 transition-colors"
+          >
+            Reload
+          </button>
+        </div>
+      )}
+
+      {/* Sync success banner (auto-clears after 5s) */}
       {syncedDocId && (
         <div className="flex items-center justify-between bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg px-4 py-3">
           <span>Synced to external successfully.</span>
@@ -272,14 +326,14 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Save status — hidden when idle or read-only */}
+          {/* Save status */}
           {!readOnly && saveStatus !== 'idle' && (
             <span className={`text-xs ${SAVE_COLOR[saveStatus]}`}>
               {SAVE_TEXT[saveStatus]}
             </span>
           )}
 
-          {/* Lock indicator */}
+          {/* Lock / identity indicator */}
           <span className="text-xs text-gray-400">
             {lockState.status === 'loading'  && 'Checking edit access…'}
             {lockState.status === 'acquired' && (
@@ -288,10 +342,10 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
                 {userTeam && <span className="text-gray-400"> · {userTeam}</span>}
               </span>
             )}
-            {lockState.status === 'denied'   && 'Read-only'}
+            {lockState.status === 'denied' && 'Read-only'}
           </span>
 
-          {/* Internal doc: sync button */}
+          {/* Sync to External */}
           {!doc!.is_external && lockState.status === 'acquired' && (
             <button
               onClick={handleSync}
@@ -302,7 +356,7 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
             </button>
           )}
 
-          {/* External doc: link back to internal source */}
+          {/* View Internal (for external docs) */}
           {doc!.is_external && doc!.parent_document_id && (
             <Link
               href={`/cards/${cardId}/documents/${doc!.parent_document_id}`}
@@ -312,6 +366,7 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
             </Link>
           )}
 
+          {/* Export */}
           <button
             onClick={handleExport}
             disabled={exporting}
@@ -328,12 +383,14 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
           content={content as InstallationContent}
           onChange={c => handleChange(c)}
           readOnly={readOnly}
+          cardSeeded={(content as InstallationContent).is_card_seeded === true}
         />
       ) : (
         <FieldServiceEditor
           content={content as FieldServiceContent}
           onChange={c => handleChange(c)}
           readOnly={readOnly}
+          cardSeeded={(content as FieldServiceContent).is_card_seeded === true}
         />
       )}
     </div>

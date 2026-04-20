@@ -17,6 +17,10 @@ export interface ImageRef {
 }
 
 export interface FieldServiceContent {
+  // When true, customer/model/sid/eq_id/location were seeded from card master
+  // data at creation time and must be treated as read-only in the editor.
+  // Absent (undefined) on all documents created before this flag was introduced.
+  is_card_seeded?: boolean
   fse_name: string
   report_date: string
   customer: string
@@ -48,6 +52,7 @@ export interface FieldServiceContent {
 }
 
 export interface InstallationContent {
+  is_card_seeded?: boolean
   fse_name: string
   report_date: string
   customer: string

@@ -108,7 +108,7 @@ export default function GanttPage({ params }: { params: Params }) {
         <Link href="/dashboard" className="hover:text-blue-600 transition-colors">Dashboard</Link>
         <span>/</span>
         <Link href={`/cards/${id}`} className="hover:text-blue-600 transition-colors">
-          {card!.site}
+          {card!.customer}
         </Link>
         <span>/</span>
         <span className="text-gray-700 font-medium">Gantt Chart</span>
@@ -121,8 +121,8 @@ export default function GanttPage({ params }: { params: Params }) {
             <span className="inline-block text-xs font-medium px-2 py-0.5 rounded mb-2 bg-green-100 text-green-700">
               Installation
             </span>
-            <h1 className="text-xl font-bold text-gray-800">{card!.site}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{card!.equipment}</p>
+            <h1 className="text-xl font-bold text-gray-800">{card!.customer}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{card!.model}</p>
           </div>
 
           {/* Save status */}

@@ -5,6 +5,13 @@ import type { FieldServiceContent, InstallationContent } from './report'
 export interface CardRow {
   id: string
   type: 'field_service' | 'installation'
+  // Master data fields (canonical — use these in all new code)
+  customer: string
+  model: string
+  sid: string
+  eq_id: string
+  location: string
+  // Deprecated — kept for DB compatibility until 0003_drop_deprecated_columns.sql
   site: string
   equipment: string
   created_at: string
@@ -57,7 +64,8 @@ export interface GanttPayload {
 
 // ── Insert types (omit server-generated fields) ───────────────
 
-export type CardInsert = Omit<CardRow, 'id' | 'created_at' | 'updated_at'>
+// New inserts supply the 5 master fields; site/equipment are legacy and omitted
+export type CardInsert = Omit<CardRow, 'id' | 'created_at' | 'updated_at' | 'site' | 'equipment'>
 
 export type DocumentInsert = Omit<DocumentRow, 'id' | 'created_at' | 'updated_at'>
 

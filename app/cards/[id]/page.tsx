@@ -120,8 +120,8 @@ export default function CardPage({ params }: { params: Params }) {
     setCreateError('')
 
     const content = card.type === 'installation'
-      ? defaultInstallationContent()
-      : defaultFieldServiceContent()
+      ? defaultInstallationContent(card)
+      : defaultFieldServiceContent(card)
 
     try {
       const res = await fetch(`/api/cards/${id}/documents`, {
@@ -183,7 +183,7 @@ export default function CardPage({ params }: { params: Params }) {
       <div className="flex items-center gap-2 text-sm text-gray-400 mb-6">
         <Link href="/dashboard" className="hover:text-blue-600 transition-colors">Dashboard</Link>
         <span>/</span>
-        <span className="text-gray-700 font-medium">{card!.site}</span>
+        <span className="text-gray-700 font-medium">{card!.customer}</span>
       </div>
 
       {/* Card header */}
@@ -193,8 +193,8 @@ export default function CardPage({ params }: { params: Params }) {
             <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded mb-2 ${TYPE_BADGE[card!.type]}`}>
               {TYPE_LABEL[card!.type]}
             </span>
-            <h1 className="text-xl font-bold text-gray-800">{card!.site}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{card!.equipment}</p>
+            <h1 className="text-xl font-bold text-gray-800">{card!.customer}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{card!.model}</p>
           </div>
           <div className="flex gap-2 shrink-0">
             {card!.type === 'installation' && (

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-const HEARTBEAT_MS = 20_000 // 20 seconds
+const HEARTBEAT_MS = 20_000 // 20 s — heartbeat when held, retry poll when denied
 
 export type LockState =
   | { status: 'loading' }
@@ -16,13 +16,16 @@ export function useLock(cardId: string, userName: string): LockState {
   const heldRef      = useRef(false)
 
   useEffect(() => {
-    // Skip API calls until we have both identifiers
     if (!cardId || !userName) return
+
+    // `active` prevents state updates and interval creation after this effect
+    // cleans up (e.g. fast navigation away while the first fetch is in-flight).
+    let active = true
 
     heldRef.current = false
     setLockState({ status: 'loading' })
 
-    async function acquire(): Promise<boolean> {
+    async function acquire() {
       try {
         const res = await fetch('/api/locks/acquire', {
           method:  'POST',
@@ -30,24 +33,28 @@ export function useLock(cardId: string, userName: string): LockState {
           body:    JSON.stringify({ cardId, userName }),
         })
 
+        if (!active) return // unmounted while fetch was in-flight
+
         if (res.ok) {
           heldRef.current = true
           setLockState({ status: 'acquired' })
-          return true
+          return
         }
 
         if (res.status === 409) {
           const data = await res.json()
+          if (!active) return
           heldRef.current = false
           setLockState({ status: 'denied', lockedBy: data.lockedBy, expiresAt: data.expiresAt })
-          return false
+          return
         }
 
+        heldRef.current = false
         setLockState({ status: 'error', message: 'Failed to acquire lock.' })
-        return false
       } catch {
+        if (!active) return
+        heldRef.current = false
         setLockState({ status: 'error', message: 'Network error.' })
-        return false
       }
     }
 
@@ -61,17 +68,21 @@ export function useLock(cardId: string, userName: string): LockState {
           body:    JSON.stringify({ cardId, userName }),
         })
       } catch {
-        // best-effort release — ignore errors on unmount
+        // best-effort — lock expires naturally after 60 s
       }
     }
 
-    acquire().then(acquired => {
-      if (acquired) {
-        heartbeatRef.current = setInterval(acquire, HEARTBEAT_MS)
-      }
+    // Initial acquire, then start interval unconditionally.
+    // While held: interval acts as heartbeat (refreshes TTL).
+    // While denied/error: interval acts as retry poll — auto-upgrades to
+    // editing when the blocking lock expires.
+    acquire().then(() => {
+      if (!active) return // cleaned up before fetch resolved — don't create zombie interval
+      heartbeatRef.current = setInterval(acquire, HEARTBEAT_MS)
     })
 
     return () => {
+      active = false
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current)
         heartbeatRef.current = null

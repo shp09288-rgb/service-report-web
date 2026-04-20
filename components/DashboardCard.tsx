@@ -6,6 +6,7 @@ import type { CardRow } from '@/types/db'
 interface Props {
   card: CardRow
   lockedBy?: string | null
+  onEdit: (card: CardRow) => void
   onDelete: (id: string) => void
 }
 
@@ -25,7 +26,13 @@ function formatDate(iso: string) {
   })
 }
 
-export function DashboardCard({ card, lockedBy, onDelete }: Props) {
+export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
+  function handleEdit(e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    onEdit(card)
+  }
+
   function handleDelete(e: React.MouseEvent) {
     e.preventDefault()
     e.stopPropagation()
@@ -46,12 +53,29 @@ export function DashboardCard({ card, lockedBy, onDelete }: Props) {
             </span>
           )}
         </div>
-        <p className="font-semibold text-gray-800 leading-snug">{card.site}</p>
-        <p className="text-sm text-gray-500 mt-0.5">{card.equipment}</p>
+
+        <p className="font-semibold text-gray-800 leading-snug">{card.customer}</p>
+        <p className="text-sm text-gray-500 mt-0.5">{card.model}</p>
+
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
+          {card.eq_id && (
+            <span className="text-xs text-gray-400">EQ: {card.eq_id}</span>
+          )}
+          {card.sid && (
+            <span className="text-xs text-gray-400">SID: {card.sid}</span>
+          )}
+        </div>
+
         <p className="text-xs text-gray-400 mt-3">Updated {formatDate(card.updated_at)}</p>
       </Link>
 
-      <div className="border-t border-gray-100 px-5 py-2 flex justify-end">
+      <div className="border-t border-gray-100 px-5 py-2 flex justify-end gap-3">
+        <button
+          onClick={handleEdit}
+          className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+        >
+          Edit
+        </button>
         <button
           onClick={handleDelete}
           className="text-xs text-red-400 hover:text-red-600 transition-colors"

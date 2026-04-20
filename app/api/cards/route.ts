@@ -20,18 +20,29 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   if (!body) return err('Invalid JSON', 400)
 
-  const { type, site, equipment } = body
+  const { type, customer, model, sid, eq_id, location } = body as {
+    type?: string
+    customer?: string
+    model?: string
+    sid?: string
+    eq_id?: string
+    location?: string
+  }
 
-  if (!type || !site || !equipment)
-    return err('type, site, and equipment are required', 400)
-
-  if (type !== 'field_service' && type !== 'installation')
+  if (!type || !customer?.trim() || !model?.trim()) {
+    return err('type, customer, and model are required', 400)
+  }
+  if (type !== 'field_service' && type !== 'installation') {
     return err('type must be field_service or installation', 400)
+  }
 
   const insert: CardInsert = {
-    type,
-    site: site.trim(),
-    equipment: equipment.trim(),
+    type: type as CardInsert['type'],
+    customer: customer.trim(),
+    model:    model.trim(),
+    sid:      (sid ?? '').trim(),
+    eq_id:    (eq_id ?? '').trim(),
+    location: (location ?? '').trim(),
   }
 
   const { data, error } = await supabaseAdmin
