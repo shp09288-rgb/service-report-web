@@ -9,6 +9,7 @@ import { useLock } from '@/hooks/useLock'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import type { CardRow, DocumentRow } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
+import { normalizeFieldServiceContent } from '@/lib/content-defaults'
 
 type Content = FieldServiceContent | InstallationContent
 
@@ -115,7 +116,14 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         ])
         setDoc(docData)
         setCard(cardData)
-        setContent(docData.content as Content)
+        // Normalize field_service content at load time so the editor
+        // always receives fully-structured data, regardless of how old
+        // or partially-migrated the stored JSON is.
+        setContent(
+          cardData.type === 'field_service'
+            ? normalizeFieldServiceContent(docData.content) as Content
+            : docData.content as Content
+        )
       })
       .catch(() => setLoadError('Network error. Check your Supabase connection.'))
       .finally(() => setLoading(false))

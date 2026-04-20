@@ -20,7 +20,23 @@
       "Bash(unzip -q \"/c/Users/shp09/Documents/Service-Report-Web-rev01/references/Park Systems Field Service Passdown Report.xlsx\" xl/worksheets/sheet1.xml -d fs_temp)",
       "Bash(npm install *)",
       "Bash(npx tsc *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(node -e \"const d = require\\('docx'\\); console.log\\(Object.keys\\(d\\).filter\\(k => k.toLowerCase\\(\\).includes\\('image'\\)\\)\\)\")",
+      "Bash(node -e \"const {ImageRun} = require\\('docx'\\); const ir = new ImageRun\\({data: Buffer.from\\('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==','base64'\\), transformation:{width:1,height:1}}\\); console.log\\('ImageRun OK'\\)\")",
+      "Bash(python)",
+      "Bash(python -c \"import openpyxl; print\\('openpyxl imported successfully'\\)\")",
+      "Bash(python scripts/extract-text.py \"C:\\\\Users\\\\shp09\\\\Documents\\\\Service-Report-Web-rev01\\\\references\\\\Park Systems Field Service Passdown Report.xlsx\")",
+      "Bash(unzip -q \"C:\\\\Users\\\\shp09\\\\Documents\\\\Service-Report-Web-rev01\\\\references\\\\Park Systems Field Service Passdown Report.xlsx\" -d xlsx_extracted)",
+      "Bash(cat)",
+      "Bash(chmod +x /tmp/analyze.sh)",
+      "Bash(/tmp/analyze.sh)",
+      "Bash(chmod +x /tmp/extract_merges.sh)",
+      "Bash(/tmp/extract_merges.sh)",
+      "Bash(python -c ' *)",
+      "Bash(where python *)",
+      "Bash(where python3 *)",
+      "Bash(py --version)",
+      "Bash('C:\\\\Users\\\\shp09\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python310\\\\python.exe' -c ' *)"
     ]
   }
 }

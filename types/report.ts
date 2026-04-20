@@ -1,6 +1,16 @@
+export interface NoteImage {
+  key: string
+  data_url: string   // base64 data URI — embeddable into DOCX
+  caption: string
+  width?: number     // natural pixel width
+  height?: number    // natural pixel height
+}
+
 export interface CriticalItem {
-  text: string
-  sub_items: string[]
+  title: string
+  note: string
+  progress_pct: number
+  note_images: NoteImage[]
 }
 
 export interface WorkCompletion {

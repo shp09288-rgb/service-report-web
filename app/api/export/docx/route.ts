@@ -5,6 +5,7 @@ import { buildFieldServiceSections } from '@/lib/docx-builders/field-service'
 import { buildInstallationSections } from '@/lib/docx-builders/installation'
 import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
+import { normalizeFieldServiceContent } from '@/lib/content-defaults'
 
 function err(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
 
   if (cardRow.type === 'field_service') {
     sections = buildFieldServiceSections(
-      docRow.content as FieldServiceContent,
+      normalizeFieldServiceContent(docRow.content) as FieldServiceContent,
       docRow.report_date,
     )
     filename = `field-service-${docRow.report_date}.docx`
@@ -71,8 +72,16 @@ export async function POST(req: NextRequest) {
     return err('Unsupported card type', 400)
   }
 
+  // 1.27 cm margins (720 twips) to match compact Park Systems report layout
   const docx = new Document({
-    sections: [{ properties: {}, children: sections as Paragraph[] }],
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: 720, bottom: 720, left: 720, right: 720 },
+        },
+      },
+      children: sections as Paragraph[],
+    }],
   })
 
   const buffer = await Packer.toBuffer(docx)
