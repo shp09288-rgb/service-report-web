@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyPassword, updatePasswordHash } from '@/lib/settings'
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit'
 
 function err(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
 }
 
 export async function POST(req: NextRequest) {
+  const ip = getClientIp(req)
+  if (!checkRateLimit(ip)) return err('Too many requests', 429)
+
   const body = await req.json().catch(() => null)
   if (!body) return err('Invalid JSON', 400)
 

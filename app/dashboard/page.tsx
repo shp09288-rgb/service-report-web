@@ -35,10 +35,11 @@ export default function DashboardPage() {
   const [createError, setCreateError]         = useState('')
 
   // Edit card modal
-  const [editingCard, setEditingCard] = useState<CardRow | null>(null)
-  const [editForm, setEditForm]       = useState(EMPTY_CARD_FORM)
-  const [saving, setSaving]           = useState(false)
-  const [editError, setEditError]     = useState('')
+  const [editingCard, setEditingCard]     = useState<CardRow | null>(null)
+  const [editForm, setEditForm]           = useState(EMPTY_CARD_FORM)
+  const [editAdminPassword, setEditAdminPassword] = useState('')
+  const [saving, setSaving]               = useState(false)
+  const [editError, setEditError]         = useState('')
 
   // Delete + admin password modal
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
@@ -54,6 +55,10 @@ export default function DashboardPage() {
   const [changingPw, setChangingPw]                 = useState(false)
   const [changePwError, setChangePwError]           = useState('')
   const [changePwSuccess, setChangePwSuccess]       = useState(false)
+
+  // Sort
+  type SortKey = 'updated_at' | 'customer'
+  const [sortKey, setSortKey] = useState<SortKey>('updated_at')
 
   // Backup
   const [backing, setBacking]       = useState(false)
@@ -139,6 +144,7 @@ export default function DashboardPage() {
       eq_id:    card.eq_id,
       location: card.location,
     })
+    setEditAdminPassword('')
     setEditError('')
     setSaving(false)
   }
@@ -149,13 +155,17 @@ export default function DashboardPage() {
       setEditError('Customer and Model are required.')
       return
     }
+    if (!editAdminPassword) {
+      setEditError('Admin password is required to save changes.')
+      return
+    }
     setSaving(true)
     setEditError('')
     try {
       const res = await fetch(`/api/cards/${editingCard.id}`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(editForm),
+        body:    JSON.stringify({ ...editForm, password: editAdminPassword }),
       })
       if (!res.ok) {
         const body = await res.json()
@@ -271,13 +281,20 @@ export default function DashboardPage() {
     .filter(c => typeFilter === 'all' || c.type === typeFilter)
     .filter(c => {
       if (!searchQuery) return true
-      const q = searchQuery.toLowerCase()
+      const q = searchQuery.trim().toLowerCase()
       return (
         c.customer.toLowerCase().includes(q) ||
         c.model.toLowerCase().includes(q) ||
         c.eq_id.toLowerCase().includes(q) ||
-        c.sid.toLowerCase().includes(q)
+        c.sid.toLowerCase().includes(q) ||
+        c.location.toLowerCase().includes(q)
       )
+    })
+    .sort((a, b) => {
+      if (sortKey === 'customer') return a.customer.localeCompare(b.customer)
+      // 'updated_at' DESC — API already returns this order but we re-sort
+      // to keep order correct after local edits
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     })
 
   // ── Render ───────────────────────────────────────────────────
@@ -311,15 +328,23 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Search + Filter bar */}
+      {/* Search + Filter + Sort bar */}
       <div className="flex gap-3 mb-6">
         <input
           type="text"
-          placeholder="Search customer, model, EQ ID, SID…"
+          placeholder="Search customer, model, SID, EQ ID, or location…"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
+        <select
+          value={sortKey}
+          onChange={e => setSortKey(e.target.value as 'updated_at' | 'customer')}
+          className="border border-gray-300 rounded px-3 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="updated_at">Recently Updated</option>
+          <option value="customer">Customer A–Z</option>
+        </select>
         <div className="flex rounded border border-gray-300 overflow-hidden text-sm">
           {(['all', 'field_service', 'installation'] as TypeFilter[]).map(t => (
             <button
@@ -397,11 +422,11 @@ export default function DashboardPage() {
               </div>
               {(
                 [
-                  { key: 'customer', label: 'Customer', placeholder: 'e.g. Samsung Display — Asan' },
-                  { key: 'model',    label: 'Model',    placeholder: 'e.g. NX20' },
-                  { key: 'sid',      label: 'SID',      placeholder: 'e.g. SID-00123' },
-                  { key: 'eq_id',    label: 'EQ ID',    placeholder: 'e.g. NX20-003' },
-                  { key: 'location', label: 'Location', placeholder: 'e.g. Asan, South Korea' },
+                  { key: 'customer', label: 'Customer', placeholder: 'e.g. SDC A6' },
+                  { key: 'model',    label: 'Model',    placeholder: 'e.g. NX-TSH2326' },
+                  { key: 'sid',      label: 'SID',      placeholder: 'e.g. D25005-190423' },
+                  { key: 'eq_id',    label: 'EQ ID',    placeholder: 'e.g. EQ01' },
+                  { key: 'location', label: 'Location', placeholder: 'e.g. [ASAN] SDC A6 CR2F M16 기둥열 부근' },
                 ] as { key: keyof typeof createForm; label: string; placeholder: string }[]
               ).map(({ key, label, placeholder }) => (
                 <div key={key}>
@@ -449,6 +474,9 @@ export default function DashboardPage() {
               <h2 className="text-base font-bold text-gray-800">Edit Card</h2>
             </div>
             <div className="px-6 py-5 space-y-3">
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                This only updates the card master data. Existing reports will not be changed.
+              </p>
               {(
                 [
                   { key: 'customer', label: 'Customer', placeholder: '' },
@@ -471,6 +499,19 @@ export default function DashboardPage() {
                   />
                 </div>
               ))}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Admin Password <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="Required to save changes"
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  value={editAdminPassword}
+                  onChange={e => setEditAdminPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSaveEdit()}
+                />
+              </div>
               {editError && <p className="text-xs text-red-500">{editError}</p>}
             </div>
             <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-2">

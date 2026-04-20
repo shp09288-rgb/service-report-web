@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { verifyPassword } from '@/lib/settings'
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit'
 
 function err(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
@@ -30,12 +31,23 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const ip = getClientIp(req)
+  if (!checkRateLimit(ip)) return err('Too many requests', 429)
+
   const { id } = await params
   const body = await req.json().catch(() => null)
   if (!body) return err('Invalid JSON', 400)
 
-  const { customer, model, sid, eq_id, location } =
-    body as { customer?: string; model?: string; sid?: string; eq_id?: string; location?: string }
+  const { customer, model, sid, eq_id, location, password } =
+    body as {
+      customer?: string; model?: string; sid?: string
+      eq_id?: string; location?: string; password?: string
+    }
+
+  if (!password) return err('Password required', 400)
+
+  const valid = await verifyPassword(password)
+  if (!valid) return err('Unauthorized', 401)
 
   if (!customer?.trim() || !model?.trim()) {
     return err('customer and model are required', 400)
@@ -44,11 +56,14 @@ export async function PATCH(
   const { data, error } = await supabaseAdmin
     .from('cards')
     .update({
-      customer: customer.trim(),
-      model:    model.trim(),
-      sid:      (sid ?? '').trim(),
-      eq_id:    (eq_id ?? '').trim(),
-      location: (location ?? '').trim(),
+      customer:   customer.trim(),
+      model:      model.trim(),
+      sid:        (sid ?? '').trim(),
+      eq_id:      (eq_id ?? '').trim(),
+      location:   (location ?? '').trim(),
+      // Keep legacy columns in sync until cleanup migration
+      site:       customer.trim(),
+      equipment:  model.trim(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -67,6 +82,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const ip = getClientIp(req)
+  if (!checkRateLimit(ip)) return err('Too many requests', 429)
+
   const { id } = await params
 
   const body = await req.json().catch(() => null)

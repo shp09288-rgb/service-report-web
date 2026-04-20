@@ -36,13 +36,17 @@ export async function POST(req: NextRequest) {
     return err('type must be field_service or installation', 400)
   }
 
-  const insert: CardInsert = {
-    type: type as CardInsert['type'],
-    customer: customer.trim(),
-    model:    model.trim(),
-    sid:      (sid ?? '').trim(),
-    eq_id:    (eq_id ?? '').trim(),
-    location: (location ?? '').trim(),
+  const insert: CardInsert & { site: string; equipment: string } = {
+    type:      type as CardInsert['type'],
+    customer:  customer.trim(),
+    model:     model.trim(),
+    sid:       (sid ?? '').trim(),
+    eq_id:     (eq_id ?? '').trim(),
+    location:  (location ?? '').trim(),
+    // Compatibility: site/equipment are NOT NULL in the DB until the cleanup
+    // migration runs; mirror the canonical fields so the constraint is satisfied.
+    site:      customer.trim(),
+    equipment: model.trim(),
   }
 
   const { data, error } = await supabaseAdmin
