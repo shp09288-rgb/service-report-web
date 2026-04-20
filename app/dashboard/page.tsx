@@ -352,7 +352,7 @@ export default function DashboardPage() {
               onClick={() => setTypeFilter(t)}
               className={`px-3 py-2 transition-colors ${
                 typeFilter === t
-                  ? 'bg-gray-700 text-white'
+                  ? 'bg-[#0F172A] text-white'
                   : 'bg-white text-gray-600 hover:bg-gray-50'
               } ${t !== 'all' ? 'border-l border-gray-300' : ''}`}
             >

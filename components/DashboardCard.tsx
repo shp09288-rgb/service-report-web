@@ -40,7 +40,7 @@ export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg hover:shadow-md transition-shadow flex flex-col">
+    <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col">
       <Link href={`/cards/${card.id}`} className="flex-1 block p-5">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${TYPE_BADGE[card.type]}`}>
