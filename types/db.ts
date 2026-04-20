@@ -18,6 +18,13 @@ export interface CardRow extends Record<string, unknown> {
   updated_at: string
 }
 
+export interface ImportSourceMeta {
+  import_hash: string      // SHA-256 of file_name + '::' + sheet_name
+  file_name: string
+  sheet_name: string
+  imported_at: string      // ISO timestamp
+}
+
 export interface DocumentRow extends Record<string, unknown> {
   id: string
   card_id: string
@@ -25,6 +32,7 @@ export interface DocumentRow extends Record<string, unknown> {
   is_external: boolean
   parent_document_id: string | null
   content: FieldServiceContent | InstallationContent
+  source_meta: ImportSourceMeta | null
   created_at: string
   updated_at: string
 }
