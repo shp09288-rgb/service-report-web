@@ -381,9 +381,16 @@ export default function DashboardPage() {
       {!loading && !fetchError && (
         filteredCards.length === 0 ? (
           <div className="border border-dashed border-[#E2E8F0] rounded-xl p-12 text-center text-[#64748B] text-sm">
-            {cards.length === 0
-              ? <><strong className="text-[#0F172A]">+ New Card</strong> to get started.</>
-              : 'No cards match your search.'}
+            {cards.length === 0 ? (
+              <div className="space-y-4">
+                <p>No cards yet.</p>
+                <button onClick={openCreate} className={btnPri}>
+                  + New Card
+                </button>
+              </div>
+            ) : (
+              'No cards match your search.'
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -28,10 +28,10 @@ function formatDate(iso: string) {
 
 export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
   return (
-    <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm hover:shadow-md transition-all duration-150 flex flex-col">
+    <div className="group/card bg-white border border-[#E2E8F0] rounded-xl shadow-sm hover:shadow-md hover:border-[#CBD5E1] transition-all duration-150 flex flex-col cursor-pointer">
 
       {/* Clickable card body */}
-      <Link href={`/cards/${card.id}`} className="flex-1 block p-5">
+      <Link href={`/cards/${card.id}`} className="flex-1 block p-5 group-hover/card:bg-[#F8FAFC] rounded-t-xl transition-colors duration-150">
 
         {/* Badges row */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">

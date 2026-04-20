@@ -17,7 +17,7 @@ export function AppHeader() {
 
   return (
     <>
-      <header className="bg-[#0F172A] text-white px-8 py-0 flex items-stretch justify-between">
+      <header className="bg-[#0F172A] text-white px-8 py-0 flex items-stretch justify-between border-b border-[#1E293B] shadow-sm">
         {/* Left — logo + subtitle */}
         <div className="flex items-center gap-4 py-3.5">
           <Link
@@ -34,7 +34,9 @@ export function AppHeader() {
         {ready && (
           <button
             onClick={() => setShowProfile(true)}
-            className="flex items-center gap-2.5 py-3.5 group"
+            className={`flex items-center gap-2.5 py-3.5 group rounded px-2 -mr-2 transition-colors ${
+              isUnset ? 'ring-1 ring-slate-600 hover:ring-slate-400' : ''
+            }`}
             aria-label="Edit user profile"
           >
             {/* Avatar circle */}
