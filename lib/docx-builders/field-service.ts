@@ -72,7 +72,7 @@ const PAD = { top: 30, bottom: 30, left: 70, right: 70 }
 const PAD_TEXT = { top: 50, bottom: 50, left: 90, right: 90 }
 const PAD_HEADER = { top: 45, bottom: 45, left: 80, right: 80 }
 
-const SZ_TITLE = 26
+const SZ_TITLE = 24
 const SZ_VALUE = 16
 const SZ_SMALL = 14
 
@@ -196,11 +196,13 @@ function simpleSpacer(): Paragraph {
 }
 
 function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, logo: Buffer | null): Table {
-  const leftWidth = 7050
-  const rightWidth = FULL_WIDTH - leftWidth
-
   const logoCol = 1350
-  const titleCol = leftWidth - logoCol
+  const titleCol = Math.round(10 * 567) // 10cm
+  const leftWidth = logoCol + titleCol
+
+  const rightLabelWidth = Math.round(3 * 567)   // 3cm
+  const rightValueWidth = Math.round(2.6 * 567) // 2.6cm
+  const rightWidth = rightLabelWidth + rightValueWidth
 
   const leftInner = new Table({
     width: { size: leftWidth, type: WidthType.DXA },
@@ -253,9 +255,6 @@ function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, log
       }),
     ],
   })
-
-  const rightLabelWidth = 1550
-  const rightValueWidth = rightWidth - rightLabelWidth
 
   const rightInner = new Table({
     width: { size: rightWidth, type: WidthType.DXA },
@@ -322,7 +321,7 @@ function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, log
           new TableCell({
             width: { size: rightWidth, type: WidthType.DXA },
             borders: NO_CELL_BORDERS,
-            margins: { top: 0, bottom: 0, left: 120, right: 0 },
+            margins: { top: 0, bottom: 0, left: 0, right: 0 },
             verticalAlign: VerticalAlign.CENTER,
             children: [rightInner],
           }),
