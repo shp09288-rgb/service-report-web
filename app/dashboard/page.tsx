@@ -297,64 +297,66 @@ export default function DashboardPage() {
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     })
 
+  // ── Shared style tokens ──────────────────────────────────────
+  const input   = 'w-full border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A] placeholder-[#94A3B8] bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-colors'
+  const label   = 'block text-xs font-medium text-[#0F172A] mb-1.5'
+  const btnPri  = 'text-sm font-medium px-4 py-2 rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] disabled:opacity-50 transition-colors'
+  const btnSec  = 'text-sm font-medium px-4 py-2 rounded-lg border border-[#E2E8F0] text-[#0F172A] hover:bg-[#F8FAFC] disabled:opacity-50 transition-colors'
+  const btnDng  = 'text-sm font-medium px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors'
+  const overlay = 'fixed inset-0 bg-[#0F172A]/50 flex items-center justify-center z-50'
+  const panel   = 'bg-white rounded-xl shadow-2xl w-full mx-4'
+  const mHead   = 'border-b border-[#E2E8F0] px-6 py-4'
+  const mBody   = 'px-6 py-5 space-y-4'
+  const mFoot   = 'border-t border-[#E2E8F0] px-6 py-4 flex justify-end gap-2'
+
   // ── Render ───────────────────────────────────────────────────
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-gray-800">Dashboard</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={openChangePassword}
-            className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 transition-colors"
-          >
+      {/* ── Page header ─────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-7">
+        <h1 className="text-xl font-bold text-[#0F172A]">Dashboard</h1>
+        <div className="flex items-center gap-2">
+          <button onClick={openChangePassword} className={btnSec}>
             Change Password
           </button>
-          <button
-            onClick={handleBackup}
-            disabled={backing}
-            className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
+          <button onClick={handleBackup} disabled={backing} className={btnSec}>
             {backing ? 'Exporting…' : 'Backup Export'}
           </button>
-          <button
-            onClick={openCreate}
-            className="bg-blue-600 text-white text-sm px-4 py-2 rounded hover:bg-blue-700 transition-colors"
-          >
+          <button onClick={openCreate} className={btnPri}>
             + New Card
           </button>
         </div>
       </div>
 
-      {/* Search + Filter + Sort bar */}
+      {/* ── Search + Filter + Sort bar ───────────────────────────── */}
       <div className="flex gap-3 mb-6">
         <input
           type="text"
           placeholder="Search customer, model, SID, EQ ID, or location…"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className={`flex-1 ${input}`}
         />
         <select
           value={sortKey}
           onChange={e => setSortKey(e.target.value as 'updated_at' | 'customer')}
-          className="border border-gray-300 rounded px-3 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="border border-[#E2E8F0] rounded-lg px-3 py-2 text-sm text-[#0F172A] bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] transition-colors"
         >
           <option value="updated_at">Recently Updated</option>
           <option value="customer">Customer A–Z</option>
         </select>
-        <div className="flex rounded border border-gray-300 overflow-hidden text-sm">
+        <div className="flex rounded-lg border border-[#E2E8F0] overflow-hidden text-sm">
           {(['all', 'field_service', 'installation'] as TypeFilter[]).map(t => (
             <button
               key={t}
               onClick={() => setTypeFilter(t)}
-              className={`px-3 py-2 transition-colors ${
+              className={`px-3 py-2 font-medium transition-colors ${
                 typeFilter === t
                   ? 'bg-[#0F172A] text-white'
-                  : 'bg-white text-gray-600 hover:bg-gray-50'
-              } ${t !== 'all' ? 'border-l border-gray-300' : ''}`}
+                  : 'bg-white text-[#64748B] hover:bg-[#F8FAFC]'
+              } ${t !== 'all' ? 'border-l border-[#E2E8F0]' : ''}`}
             >
               {t === 'all' ? 'All' : t === 'field_service' ? 'Field Service' : 'Installation'}
             </button>
@@ -362,25 +364,25 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* States */}
-      {loading && <p className="text-sm text-gray-400">Loading cards…</p>}
+      {/* ── States ─────────────────────────────────────────────── */}
+      {loading && <p className="text-sm text-[#64748B]">Loading cards…</p>}
       {fetchError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3">
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
           {fetchError}
         </div>
       )}
       {backupError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-3 mt-3">
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mt-3">
           {backupError}
         </div>
       )}
 
-      {/* Card grid */}
+      {/* ── Card grid ───────────────────────────────────────────── */}
       {!loading && !fetchError && (
         filteredCards.length === 0 ? (
-          <div className="border border-dashed border-gray-300 rounded-lg p-12 text-center text-gray-400 text-sm">
+          <div className="border border-dashed border-[#E2E8F0] rounded-xl p-12 text-center text-[#64748B] text-sm">
             {cards.length === 0
-              ? <><strong>+ New Card</strong> to get started.</>
+              ? <><strong className="text-[#0F172A]">+ New Card</strong> to get started.</>
               : 'No cards match your search.'}
           </div>
         ) : (
@@ -400,19 +402,16 @@ export default function DashboardPage() {
 
       {/* ── Create card modal ─────────────────────────────────── */}
       {showCreateModal && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={e => { if (e.target === e.currentTarget) setShowCreateModal(false) }}
-        >
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-base font-bold text-gray-800">New Card</h2>
+        <div className={overlay} onClick={e => { if (e.target === e.currentTarget) setShowCreateModal(false) }}>
+          <div className={`${panel} max-w-md`}>
+            <div className={mHead}>
+              <h2 className="text-sm font-semibold text-[#0F172A]">New Card</h2>
             </div>
-            <div className="px-6 py-5 space-y-3">
+            <div className={mBody}>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
+                <label className={label}>Type</label>
                 <select
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className={input}
                   value={createForm.type}
                   onChange={e => setCreateForm(f => ({ ...f, type: e.target.value as CardType }))}
                 >
@@ -428,15 +427,15 @@ export default function DashboardPage() {
                   { key: 'eq_id',    label: 'EQ ID',    placeholder: 'e.g. EQ01' },
                   { key: 'location', label: 'Location', placeholder: 'e.g. [ASAN] SDC A6 CR2F M16 기둥열 부근' },
                 ] as { key: keyof typeof createForm; label: string; placeholder: string }[]
-              ).map(({ key, label, placeholder }) => (
+              ).map(({ key, label: lbl, placeholder }) => (
                 <div key={key}>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    {label}{(key === 'customer' || key === 'model') && <span className="text-red-400"> *</span>}
+                  <label className={label}>
+                    {lbl}{(key === 'customer' || key === 'model') && <span className="text-red-400"> *</span>}
                   </label>
                   <input
                     type="text"
                     placeholder={placeholder}
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className={input}
                     value={createForm[key]}
                     onChange={e => setCreateForm(f => ({ ...f, [key]: e.target.value }))}
                   />
@@ -444,18 +443,9 @@ export default function DashboardPage() {
               ))}
               {createError && <p className="text-xs text-red-500">{createError}</p>}
             </div>
-            <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={creating}
-                className="text-sm px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
+            <div className={mFoot}>
+              <button onClick={() => setShowCreateModal(false)} className={btnSec}>Cancel</button>
+              <button onClick={handleCreate} disabled={creating} className={btnPri}>
                 {creating ? 'Creating…' : 'Create'}
               </button>
             </div>
@@ -465,48 +455,44 @@ export default function DashboardPage() {
 
       {/* ── Edit card modal ───────────────────────────────────── */}
       {editingCard && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={e => { if (e.target === e.currentTarget) setEditingCard(null) }}
-        >
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-base font-bold text-gray-800">Edit Card</h2>
+        <div className={overlay} onClick={e => { if (e.target === e.currentTarget) setEditingCard(null) }}>
+          <div className={`${panel} max-w-md`}>
+            <div className={mHead}>
+              <h2 className="text-sm font-semibold text-[#0F172A]">Edit Card</h2>
             </div>
-            <div className="px-6 py-5 space-y-3">
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <div className={mBody}>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 This only updates the card master data. Existing reports will not be changed.
               </p>
               {(
                 [
-                  { key: 'customer', label: 'Customer', placeholder: '' },
-                  { key: 'model',    label: 'Model',    placeholder: '' },
-                  { key: 'sid',      label: 'SID',      placeholder: '' },
-                  { key: 'eq_id',    label: 'EQ ID',    placeholder: '' },
-                  { key: 'location', label: 'Location', placeholder: '' },
-                ] as { key: keyof typeof editForm; label: string; placeholder: string }[]
-              ).map(({ key, label, placeholder }) => (
+                  { key: 'customer', label: 'Customer' },
+                  { key: 'model',    label: 'Model' },
+                  { key: 'sid',      label: 'SID' },
+                  { key: 'eq_id',    label: 'EQ ID' },
+                  { key: 'location', label: 'Location' },
+                ] as { key: keyof typeof editForm; label: string }[]
+              ).map(({ key, label: lbl }) => (
                 <div key={key}>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    {label}{(key === 'customer' || key === 'model') && <span className="text-red-400"> *</span>}
+                  <label className={label}>
+                    {lbl}{(key === 'customer' || key === 'model') && <span className="text-red-400"> *</span>}
                   </label>
                   <input
                     type="text"
-                    placeholder={placeholder}
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className={input}
                     value={editForm[key]}
                     onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
                   />
                 </div>
               ))}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
+                <label className={label}>
                   Admin Password <span className="text-red-400">*</span>
                 </label>
                 <input
                   type="password"
                   placeholder="Required to save changes"
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className={input}
                   value={editAdminPassword}
                   onChange={e => setEditAdminPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleSaveEdit()}
@@ -514,18 +500,9 @@ export default function DashboardPage() {
               </div>
               {editError && <p className="text-xs text-red-500">{editError}</p>}
             </div>
-            <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-              <button
-                onClick={() => setEditingCard(null)}
-                className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveEdit}
-                disabled={saving}
-                className="text-sm px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-              >
+            <div className={mFoot}>
+              <button onClick={() => setEditingCard(null)} className={btnSec}>Cancel</button>
+              <button onClick={handleSaveEdit} disabled={saving} className={btnPri}>
                 {saving ? 'Saving…' : 'Save'}
               </button>
             </div>
@@ -535,25 +512,22 @@ export default function DashboardPage() {
 
       {/* ── Delete confirmation modal ─────────────────────────── */}
       {pendingDeleteId && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={e => { if (e.target === e.currentTarget) setPendingDeleteId(null) }}
-        >
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-base font-bold text-gray-800">Confirm Delete</h2>
+        <div className={overlay} onClick={e => { if (e.target === e.currentTarget) setPendingDeleteId(null) }}>
+          <div className={`${panel} max-w-sm`}>
+            <div className={mHead}>
+              <h2 className="text-sm font-semibold text-[#0F172A]">Confirm Delete</h2>
             </div>
-            <div className="px-6 py-5 space-y-4">
-              <p className="text-sm text-gray-600">
+            <div className={mBody}>
+              <p className="text-sm text-[#64748B]">
                 This will permanently delete the card and all its reports.
                 Enter the admin password to continue.
               </p>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Admin Password</label>
+                <label className={label}>Admin Password</label>
                 <input
                   type="password"
                   autoFocus
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-red-400"
+                  className={input}
                   value={deletePassword}
                   onChange={e => setDeletePassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && confirmDelete()}
@@ -561,18 +535,9 @@ export default function DashboardPage() {
               </div>
               {verifyError && <p className="text-xs text-red-500">{verifyError}</p>}
             </div>
-            <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-              <button
-                onClick={() => setPendingDeleteId(null)}
-                className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDelete}
-                disabled={verifying || !deletePassword}
-                className="text-sm px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 transition-colors"
-              >
+            <div className={mFoot}>
+              <button onClick={() => setPendingDeleteId(null)} className={btnSec}>Cancel</button>
+              <button onClick={confirmDelete} disabled={verifying || !deletePassword} className={btnDng}>
                 {verifying ? 'Verifying…' : 'Delete'}
               </button>
             </div>
@@ -582,71 +547,43 @@ export default function DashboardPage() {
 
       {/* ── Change password modal ─────────────────────────────── */}
       {showChangePassword && (
-        <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-          onClick={e => { if (e.target === e.currentTarget) setShowChangePassword(false) }}
-        >
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
-            <div className="border-b border-gray-200 px-6 py-4">
-              <h2 className="text-base font-bold text-gray-800">Change Password</h2>
+        <div className={overlay} onClick={e => { if (e.target === e.currentTarget) setShowChangePassword(false) }}>
+          <div className={`${panel} max-w-sm`}>
+            <div className={mHead}>
+              <h2 className="text-sm font-semibold text-[#0F172A]">Change Password</h2>
             </div>
 
             {changePwSuccess ? (
               <div className="px-6 py-8 text-center space-y-4">
-                <p className="text-sm text-green-700 font-medium">Password changed successfully.</p>
-                <button
-                  onClick={() => setShowChangePassword(false)}
-                  className="text-sm px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 transition-colors"
-                >
+                <p className="text-sm text-emerald-700 font-medium">Password changed successfully.</p>
+                <button onClick={() => setShowChangePassword(false)} className={btnPri}>
                   Close
                 </button>
               </div>
             ) : (
               <>
-                <div className="px-6 py-5 space-y-3">
+                <div className={mBody}>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Current Password</label>
-                    <input
-                      type="password"
-                      autoFocus
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      value={currentPw}
-                      onChange={e => setCurrentPw(e.target.value)}
-                    />
+                    <label className={label}>Current Password</label>
+                    <input type="password" autoFocus className={input}
+                      value={currentPw} onChange={e => setCurrentPw(e.target.value)} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">New Password</label>
-                    <input
-                      type="password"
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      value={newPw}
-                      onChange={e => setNewPw(e.target.value)}
-                    />
+                    <label className={label}>New Password</label>
+                    <input type="password" className={input}
+                      value={newPw} onChange={e => setNewPw(e.target.value)} />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">Confirm New Password</label>
-                    <input
-                      type="password"
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      value={confirmPw}
-                      onChange={e => setConfirmPw(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleChangePassword()}
-                    />
+                    <label className={label}>Confirm New Password</label>
+                    <input type="password" className={input}
+                      value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleChangePassword()} />
                   </div>
                   {changePwError && <p className="text-xs text-red-500">{changePwError}</p>}
                 </div>
-                <div className="border-t border-gray-200 px-6 py-4 flex justify-end gap-2">
-                  <button
-                    onClick={() => setShowChangePassword(false)}
-                    className="text-sm px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleChangePassword}
-                    disabled={changingPw}
-                    className="text-sm px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-colors"
-                  >
+                <div className={mFoot}>
+                  <button onClick={() => setShowChangePassword(false)} className={btnSec}>Cancel</button>
+                  <button onClick={handleChangePassword} disabled={changingPw} className={btnPri}>
                     {changingPw ? 'Saving…' : 'Change Password'}
                   </button>
                 </div>

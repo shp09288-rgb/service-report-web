@@ -16,8 +16,8 @@ const TYPE_LABEL: Record<CardRow['type'], string> = {
 }
 
 const TYPE_BADGE: Record<CardRow['type'], string> = {
-  field_service: 'bg-blue-100 text-blue-700',
-  installation:  'bg-green-100 text-green-700',
+  field_service: 'bg-blue-50 text-blue-700 border border-blue-200',
+  installation:  'bg-emerald-50 text-emerald-700 border border-emerald-200',
 }
 
 function formatDate(iso: string) {
@@ -27,58 +27,63 @@ function formatDate(iso: string) {
 }
 
 export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
-  function handleEdit(e: React.MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    onEdit(card)
-  }
-
-  function handleDelete(e: React.MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    onDelete(card.id)
-  }
-
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col">
+    <div className="bg-white border border-[#E2E8F0] rounded-xl shadow-sm hover:shadow-md transition-all duration-150 flex flex-col">
+
+      {/* Clickable card body */}
       <Link href={`/cards/${card.id}`} className="flex-1 block p-5">
+
+        {/* Badges row */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${TYPE_BADGE[card.type]}`}>
+          <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-md ${TYPE_BADGE[card.type]}`}>
             {TYPE_LABEL[card.type]}
           </span>
           {lockedBy && (
-            <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">
-              <span>🔒</span>
-              <span className="truncate max-w-[120px]">{lockedBy}</span>
+            <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-md px-1.5 py-0.5">
+              <span aria-hidden>🔒</span>
+              <span className="truncate max-w-[110px]">{lockedBy}</span>
             </span>
           )}
         </div>
 
-        <p className="font-semibold text-gray-800 leading-snug">{card.customer}</p>
-        <p className="text-sm text-gray-500 mt-0.5">{card.model}</p>
+        {/* Primary identity */}
+        <p className="font-semibold text-[#0F172A] text-sm leading-snug">{card.customer}</p>
+        <p className="text-sm text-[#64748B] mt-0.5">{card.model}</p>
 
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
-          {card.eq_id && (
-            <span className="text-xs text-gray-400">EQ: {card.eq_id}</span>
-          )}
-          {card.sid && (
-            <span className="text-xs text-gray-400">SID: {card.sid}</span>
-          )}
-        </div>
+        {/* Secondary metadata tags */}
+        {(card.eq_id || card.sid) && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-2.5">
+            {card.eq_id && (
+              <span className="inline-flex items-center gap-1 text-xs text-[#64748B]">
+                <span className="font-medium text-[#94A3B8]">EQ</span>
+                {card.eq_id}
+              </span>
+            )}
+            {card.sid && (
+              <span className="inline-flex items-center gap-1 text-xs text-[#64748B]">
+                <span className="font-medium text-[#94A3B8]">SID</span>
+                {card.sid}
+              </span>
+            )}
+          </div>
+        )}
 
-        <p className="text-xs text-gray-400 mt-3">Updated {formatDate(card.updated_at)}</p>
+        {/* Updated date */}
+        <p className="text-xs text-[#94A3B8] mt-3">Updated {formatDate(card.updated_at)}</p>
       </Link>
 
-      <div className="border-t border-gray-100 px-5 py-2 flex justify-end gap-3">
+      {/* Action bar */}
+      <div className="border-t border-[#E2E8F0] px-5 py-2.5 flex items-center justify-end gap-1">
         <button
-          onClick={handleEdit}
-          className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          onClick={e => { e.preventDefault(); e.stopPropagation(); onEdit(card) }}
+          className="text-xs font-medium text-[#2563EB] hover:text-[#1D4ED8] px-2 py-1 rounded hover:bg-blue-50 transition-colors"
         >
           Edit
         </button>
+        <span className="text-[#E2E8F0] text-xs select-none">|</span>
         <button
-          onClick={handleDelete}
-          className="text-xs text-red-400 hover:text-red-600 transition-colors"
+          onClick={e => { e.preventDefault(); e.stopPropagation(); onDelete(card.id) }}
+          className="text-xs font-medium text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition-colors"
         >
           Delete
         </button>

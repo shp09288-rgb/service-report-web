@@ -13,31 +13,45 @@ export function AppHeader() {
   const label = userName
     ? userTeam ? `${userName} (${userTeam})` : userName
     : 'Set your name'
+  const isUnset = !userName
 
   return (
     <>
-      <header className="bg-[#0F172A] text-white px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="bg-[#0F172A] text-white px-8 py-0 flex items-stretch justify-between">
+        {/* Left — logo + subtitle */}
+        <div className="flex items-center gap-4 py-3.5">
           <Link
             href="/dashboard"
-            className="font-bold text-sm tracking-wide hover:text-blue-300 transition-colors"
+            className="font-bold text-sm tracking-wide text-white hover:text-blue-300 transition-colors"
           >
             Park Systems
           </Link>
-          <span className="text-slate-600 text-xs select-none">|</span>
-          <span className="text-slate-400 text-xs">Service Report Tool</span>
+          <span className="w-px h-4 bg-slate-600 shrink-0" />
+          <span className="text-slate-400 text-xs font-normal">Service Report Tool</span>
         </div>
 
+        {/* Right — user profile control */}
         {ready && (
           <button
             onClick={() => setShowProfile(true)}
-            className="flex items-center gap-2 text-sm text-slate-300 hover:text-white transition-colors group"
+            className="flex items-center gap-2.5 py-3.5 group"
+            aria-label="Edit user profile"
           >
-            <span className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold shrink-0 group-hover:bg-blue-500 transition-colors">
+            {/* Avatar circle */}
+            <span className="w-7 h-7 rounded-full bg-[#2563EB] group-hover:bg-[#1D4ED8] flex items-center justify-center text-xs font-bold text-white shrink-0 transition-colors">
               {initial}
             </span>
-            <span className={userName ? '' : 'text-slate-500 italic'}>
+            {/* Name / prompt */}
+            <span className={`text-sm transition-colors ${
+              isUnset
+                ? 'text-slate-500 italic group-hover:text-slate-300'
+                : 'text-slate-200 group-hover:text-white'
+            }`}>
               {label}
+            </span>
+            {/* Edit indicator */}
+            <span className="text-slate-600 group-hover:text-slate-400 transition-colors text-xs leading-none">
+              ✎
             </span>
           </button>
         )}
