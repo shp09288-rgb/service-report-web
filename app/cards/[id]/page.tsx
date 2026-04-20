@@ -1,12 +1,78 @@
 'use client'
 
 import { use, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import type { CardRow, DocumentRow } from '@/types/db'
 import { defaultFieldServiceContent, defaultInstallationContent } from '@/lib/content-defaults'
 
 type Params = Promise<{ id: string }>
+
+// ── Search utilities ──────────────────────────────────────────
+
+// Flatten all human-readable text out of a document's content
+// so keyword search can match across all relevant fields.
+// Handles both FieldServiceContent and InstallationContent safely.
+function extractSearchableText(content: unknown): string {
+  if (!content || typeof content !== 'object') return ''
+  const c = content as Record<string, unknown>
+  const parts: string[] = []
+
+  // Scalar text fields present in both content types
+  for (const f of [
+    'fse_name', 'customer', 'model', 'sid', 'eq_id', 'location',
+    'crm_case_id', 'main_user', 'tel', 'email', 'service_type',
+    'tool_status', 'site_survey', 'noise_level',
+    'problem_statement', 'target_statement', 'daily_note', 'data_location',
+    'est_complete_date', 'total_cycle_time',
+  ]) {
+    if (typeof c[f] === 'string') parts.push(c[f] as string)
+  }
+
+  // work_completion (FieldService)
+  if (c.work_completion && typeof c.work_completion === 'object') {
+    const wc = c.work_completion as Record<string, unknown>
+    for (const f of ['type', 'reason', 'detail', 'time_log']) {
+      if (typeof wc[f] === 'string') parts.push(wc[f] as string)
+    }
+  }
+
+  // critical_items — both content types have this but different shapes
+  if (Array.isArray(c.critical_items)) {
+    for (const item of c.critical_items) {
+      if (!item || typeof item !== 'object') continue
+      const it = item as Record<string, unknown>
+      for (const f of ['title', 'note', 'detail', 'next_plan']) {
+        if (typeof it[f] === 'string') parts.push(it[f] as string)
+      }
+    }
+  }
+
+  // action_chart (Installation)
+  if (Array.isArray(c.action_chart)) {
+    for (const row of c.action_chart) {
+      if (!row || typeof row !== 'object') continue
+      const r = row as Record<string, unknown>
+      if (typeof r.item === 'string') parts.push(r.item as string)
+    }
+  }
+
+  return parts.join(' ')
+}
+
+function matchesFilters(
+  doc: DocumentRow,
+  dateFilter: string,
+  keywordFilter: string,
+): boolean {
+  if (dateFilter && doc.report_date !== dateFilter) return false
+  const kw = keywordFilter.trim().toLowerCase()
+  if (kw) {
+    const text = extractSearchableText(doc.content).toLowerCase()
+    if (!text.includes(kw)) return false
+  }
+  return true
+}
 
 // ── Reusable document table section ──────────────────────────
 interface DocSectionProps {
@@ -70,7 +136,8 @@ const TYPE_BADGE: Record<CardRow['type'], string> = {
 }
 
 function formatDate(iso: string) {
-  // iso may be 'YYYY-MM-DD' (report_date) or full ISO (updated_at)
+  // iso may be 'YYYY-MM-DD' (report_date) or full ISO timestamp (updated_at).
+  // Appending T00:00:00 prevents the date shifting due to UTC interpretation.
   const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso)
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
@@ -79,9 +146,50 @@ function todayISO() {
   return new Date().toISOString().split('T')[0]
 }
 
+// ── Search bar component ──────────────────────────────────────
+interface SearchBarProps {
+  dateFilter: string
+  keywordFilter: string
+  onDateChange: (v: string) => void
+  onKeywordChange: (v: string) => void
+  onClear: () => void
+}
+
+function SearchBar({ dateFilter, keywordFilter, onDateChange, onKeywordChange, onClear }: SearchBarProps) {
+  const isActive = !!(dateFilter || keywordFilter.trim())
+  return (
+    <div className="flex flex-col sm:flex-row gap-2 bg-white border border-gray-200 rounded-lg px-4 py-3">
+      <input
+        type="date"
+        aria-label="Filter by date"
+        className="border border-gray-300 rounded px-3 py-[7px] text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white text-gray-700 sm:w-44"
+        value={dateFilter}
+        onChange={e => onDateChange(e.target.value)}
+      />
+      <input
+        type="text"
+        placeholder="Search by keyword…"
+        aria-label="Filter by keyword"
+        className="flex-1 border border-gray-300 rounded px-3 py-[7px] text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white text-gray-700 min-w-0"
+        value={keywordFilter}
+        onChange={e => onKeywordChange(e.target.value)}
+      />
+      <button
+        onClick={onClear}
+        disabled={!isActive}
+        className="shrink-0 border border-gray-300 rounded px-4 py-[7px] text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-30 disabled:cursor-default transition-colors"
+      >
+        Clear
+      </button>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
 export default function CardPage({ params }: { params: Params }) {
   const { id } = use(params)
   const router  = useRouter()
+  const searchParams = useSearchParams()
 
   const [card, setCard]         = useState<CardRow | null>(null)
   const [docs, setDocs]         = useState<DocumentRow[]>([])
@@ -92,6 +200,35 @@ export default function CardPage({ params }: { params: Params }) {
   const [reportDate, setReportDate]   = useState(todayISO())
   const [creating, setCreating]       = useState(false)
   const [createError, setCreateError] = useState('')
+
+  // ── Search state (initialised from URL query params) ─────────
+  const [dateFilter, setDateFilter]       = useState(() => searchParams.get('date')    ?? '')
+  const [keywordFilter, setKeywordFilter] = useState(() => searchParams.get('keyword') ?? '')
+
+  // Sync search state → URL query string
+  function updateUrl(date: string, keyword: string) {
+    const qp = new URLSearchParams()
+    if (date)    qp.set('date',    date)
+    if (keyword) qp.set('keyword', keyword)
+    const qs = qp.toString()
+    router.replace(`/cards/${id}${qs ? `?${qs}` : ''}`, { scroll: false })
+  }
+
+  function handleDateChange(v: string) {
+    setDateFilter(v)
+    updateUrl(v, keywordFilter)
+  }
+
+  function handleKeywordChange(v: string) {
+    setKeywordFilter(v)
+    updateUrl(dateFilter, v)
+  }
+
+  function handleClear() {
+    setDateFilter('')
+    setKeywordFilter('')
+    router.replace(`/cards/${id}`, { scroll: false })
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -153,7 +290,18 @@ export default function CardPage({ params }: { params: Params }) {
     setShowModal(true)
   }
 
-  // ── Render ──────────────────────────────────────────────────
+  // ── Filter derivation ─────────────────────────────────────────
+  const isFiltered = !!(dateFilter || keywordFilter.trim())
+
+  const filteredInternal = docs
+    .filter(d => !d.is_external)
+    .filter(d => !isFiltered || matchesFilters(d, dateFilter, keywordFilter))
+
+  const filteredExternal = docs
+    .filter(d => d.is_external)
+    .filter(d => !isFiltered || matchesFilters(d, dateFilter, keywordFilter))
+
+  // ── Render ───────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -221,19 +369,36 @@ export default function CardPage({ params }: { params: Params }) {
           No reports yet. Click <strong>+ New Report</strong> to create one.
         </div>
       ) : (
-        <div className="space-y-6">
-          <DocSection
-            title="Internal"
-            docs={docs.filter(d => !d.is_external)}
-            onOpen={docId => router.push(`/cards/${id}/documents/${docId}`)}
-            emptyText="No internal reports."
+        <div className="space-y-4">
+
+          {/* ── Search bar ──────────────────────────────────── */}
+          <SearchBar
+            dateFilter={dateFilter}
+            keywordFilter={keywordFilter}
+            onDateChange={handleDateChange}
+            onKeywordChange={handleKeywordChange}
+            onClear={handleClear}
           />
-          <DocSection
-            title="External"
-            docs={docs.filter(d => d.is_external)}
-            onOpen={docId => router.push(`/cards/${id}/documents/${docId}`)}
-            emptyText='No external reports yet. Open an internal report and use "Sync to External".'
-          />
+
+          {/* ── Internal / External sections ────────────────── */}
+          <div className="space-y-6 pt-2">
+            <DocSection
+              title="Internal"
+              docs={filteredInternal}
+              onOpen={docId => router.push(`/cards/${id}/documents/${docId}`)}
+              emptyText={isFiltered ? 'No internal reports match your search.' : 'No internal reports.'}
+            />
+            <DocSection
+              title="External"
+              docs={filteredExternal}
+              onOpen={docId => router.push(`/cards/${id}/documents/${docId}`)}
+              emptyText={
+                isFiltered
+                  ? 'No external reports match your search.'
+                  : 'No external reports yet. Open an internal report and use "Sync to External".'
+              }
+            />
+          </div>
         </div>
       )}
 
