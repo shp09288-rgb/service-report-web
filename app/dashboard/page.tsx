@@ -63,11 +63,16 @@ export default function DashboardPage() {
   // Backup
   const [backing, setBacking]       = useState(false)
   const [backupError, setBackupError] = useState('')
+  const [selectedCards, setSelectedCards] = useState<string[]>([])
 
   useEffect(() => {
     loadCards()
     loadLocks()
   }, [])
+
+  useEffect(() => {
+    setSelectedCards(prev => prev.filter(id => cards.some(card => card.id === id)))
+  }, [cards])
 
   async function loadCards() {
     setLoading(true)
@@ -203,6 +208,7 @@ export default function DashboardPage() {
       if (delRes.status === 401) { setVerifyError('Incorrect password.'); return }
       if (!delRes.ok)            { setVerifyError('Delete failed — server error.'); return }
       setCards(prev => prev.filter(c => c.id !== pendingDeleteId))
+      setSelectedCards(prev => prev.filter(id => id !== pendingDeleteId))
       setPendingDeleteId(null)
     } catch {
       setVerifyError('Network error.')
@@ -258,8 +264,21 @@ export default function DashboardPage() {
     setBacking(true)
     setBackupError('')
     try {
-      const res = await fetch('/api/backup')
-      if (!res.ok) { setBackupError('Backup failed. Try again.'); return }
+      const query = selectedCards.length > 0
+        ? `?cardIds=${encodeURIComponent(selectedCards.join(','))}`
+        : ''
+      const res = await fetch(`/api/backup${query}`)
+      if (!res.ok) {
+        let message = `Backup failed (${res.status}).`
+        try {
+          const body = await res.json()
+          if (body?.error) message = body.error
+        } catch {
+          // no-op, keep status-based error
+        }
+        setBackupError(message)
+        return
+      }
       const blob  = await res.blob()
       const url   = URL.createObjectURL(blob)
       const date  = new Date().toISOString().split('T')[0]
@@ -273,6 +292,17 @@ export default function DashboardPage() {
     } finally {
       setBacking(false)
     }
+  }
+
+  function handleToggleCardSelect(cardId: string, selected: boolean) {
+    setSelectedCards(prev => {
+      if (selected) return prev.includes(cardId) ? prev : [...prev, cardId]
+      return prev.filter(id => id !== cardId)
+    })
+  }
+
+  function clearSelection() {
+    setSelectedCards([])
   }
 
   // ── Filtered card list ───────────────────────────────────────
@@ -321,8 +351,19 @@ export default function DashboardPage() {
           <button onClick={openChangePassword} className={btnSec}>
             Change Password
           </button>
+          <button
+            onClick={clearSelection}
+            disabled={selectedCards.length === 0}
+            className={btnSec}
+          >
+            Clear Selection
+          </button>
           <button onClick={handleBackup} disabled={backing} className={btnSec}>
-            {backing ? 'Exporting…' : 'Backup Export'}
+            {backing
+              ? 'Exporting…'
+              : selectedCards.length > 0
+                ? `Export Selected (${selectedCards.length})`
+                : 'Backup Export'}
           </button>
           <button onClick={openCreate} className={btnPri}>
             + New Card
@@ -399,6 +440,8 @@ export default function DashboardPage() {
                 key={card.id}
                 card={card}
                 lockedBy={activeLocks[card.id] ?? null}
+                selected={selectedCards.includes(card.id)}
+                onToggleSelect={handleToggleCardSelect}
                 onEdit={openEdit}
                 onDelete={requestDelete}
               />

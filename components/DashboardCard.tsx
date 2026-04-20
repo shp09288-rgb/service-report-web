@@ -6,6 +6,8 @@ import type { CardRow } from '@/types/db'
 interface Props {
   card: CardRow
   lockedBy?: string | null
+  selected?: boolean
+  onToggleSelect?: (id: string, selected: boolean) => void
   onEdit: (card: CardRow) => void
   onDelete: (id: string) => void
 }
@@ -26,9 +28,15 @@ function formatDate(iso: string) {
   })
 }
 
-export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
+export function DashboardCard({ card, lockedBy, selected = false, onToggleSelect, onEdit, onDelete }: Props) {
   return (
-    <div className="group/card bg-white border border-[#E2E8F0] rounded-xl shadow-sm hover:shadow-md hover:border-[#CBD5E1] transition-all duration-150 flex flex-col cursor-pointer">
+    <div
+      className={`group/card bg-white border rounded-xl shadow-sm hover:shadow-md transition-all duration-150 flex flex-col cursor-pointer ${
+        selected
+          ? 'border-[#93C5FD] ring-1 ring-[#DBEAFE]'
+          : 'border-[#E2E8F0] hover:border-[#CBD5E1]'
+      }`}
+    >
 
       {/* Clickable card body */}
       <Link href={`/cards/${card.id}`} className="flex-1 block p-5 group-hover/card:bg-[#F8FAFC] rounded-t-xl transition-colors duration-150">
@@ -73,7 +81,20 @@ export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
       </Link>
 
       {/* Action bar */}
-      <div className="border-t border-[#E2E8F0] px-5 py-2.5 flex items-center justify-end gap-1">
+      <div className="border-t border-[#E2E8F0] px-5 py-2.5 flex items-center justify-between gap-2">
+        <label className="inline-flex items-center gap-2 text-xs text-[#64748B] select-none">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={e => onToggleSelect?.(card.id, e.target.checked)}
+            onClick={e => { e.stopPropagation() }}
+            className="h-3.5 w-3.5 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]/30"
+            aria-label={`Select ${card.customer}`}
+          />
+          Select
+        </label>
+        
+        <div className="flex items-center justify-end gap-1">
         <button
           onClick={e => { e.preventDefault(); e.stopPropagation(); onEdit(card) }}
           className="text-xs font-medium text-[#2563EB] hover:text-[#1D4ED8] px-2 py-1 rounded hover:bg-blue-50 transition-colors"
@@ -87,6 +108,7 @@ export function DashboardCard({ card, lockedBy, onEdit, onDelete }: Props) {
         >
           Delete
         </button>
+        </div>
       </div>
     </div>
   )

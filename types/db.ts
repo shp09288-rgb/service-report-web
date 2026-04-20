@@ -2,7 +2,7 @@ import type { FieldServiceContent, InstallationContent } from './report'
 
 // ── Row types (what Supabase returns) ────────────────────────
 
-export interface CardRow {
+export interface CardRow extends Record<string, unknown> {
   id: string
   type: 'field_service' | 'installation'
   // Master data fields (canonical — use these in all new code)
@@ -18,7 +18,7 @@ export interface CardRow {
   updated_at: string
 }
 
-export interface DocumentRow {
+export interface DocumentRow extends Record<string, unknown> {
   id: string
   card_id: string
   report_date: string          // 'YYYY-MM-DD'
@@ -29,19 +29,24 @@ export interface DocumentRow {
   updated_at: string
 }
 
-export interface GanttRow {
+export interface GanttRow extends Record<string, unknown> {
   id: string
   card_id: string
   payload: GanttPayload
   updated_at: string
 }
 
-export interface EditLockRow {
+export interface EditLockRow extends Record<string, unknown> {
   id: string
   card_id: string
   user_name: string
   acquired_at: string
   expires_at: string
+}
+
+export interface SettingsRow extends Record<string, unknown> {
+  key: string
+  value: string
 }
 
 // ── Gantt payload shape ───────────────────────────────────────
@@ -72,3 +77,43 @@ export type DocumentInsert = Omit<DocumentRow, 'id' | 'created_at' | 'updated_at
 export type GanttInsert = Omit<GanttRow, 'id' | 'updated_at'>
 
 export type EditLockInsert = Omit<EditLockRow, 'id'>
+
+/** Supabase client schema — tables exposed to PostgREST `public` */
+export type Database = {
+  public: {
+    Tables: {
+      cards: {
+        Row: CardRow
+        Insert: Omit<CardRow, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<CardRow>
+        Relationships: []
+      }
+      documents: {
+        Row: DocumentRow
+        Insert: DocumentInsert
+        Update: Partial<DocumentRow>
+        Relationships: []
+      }
+      gantt: {
+        Row: GanttRow
+        Insert: GanttInsert
+        Update: Partial<GanttRow>
+        Relationships: []
+      }
+      edit_locks: {
+        Row: EditLockRow
+        Insert: EditLockInsert
+        Update: Partial<EditLockRow>
+        Relationships: []
+      }
+      settings: {
+        Row: SettingsRow
+        Insert: SettingsRow
+        Update: Partial<SettingsRow>
+        Relationships: []
+      }
+    }
+    Views: Record<string, never>
+    Functions: Record<string, never>
+  }
+}
