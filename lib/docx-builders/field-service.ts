@@ -163,11 +163,11 @@ function cell({
   bg?: string
   color?: string
   bold?: boolean
-  align?: AlignmentType
+  align?: (typeof AlignmentType)[keyof typeof AlignmentType]
   margins?: { top: number; bottom: number; left: number; right: number }
-  verticalAlign?: VerticalAlign
+  verticalAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign]
   borders?: typeof CELL_BORDERS
-  verticalMerge?: VerticalMergeType
+  verticalMerge?: (typeof VerticalMergeType)[keyof typeof VerticalMergeType]
 }): TableCell {
   return new TableCell({
     columnSpan: span,
