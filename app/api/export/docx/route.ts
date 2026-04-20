@@ -46,9 +46,10 @@ export async function POST(req: NextRequest) {
     return (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
   }
 
-  const date    = docRow.report_date
+  const date     = docRow.report_date
+  const docType  = docRow.is_external ? 'External' : 'Internal'
   const customer = seg(cardRow.customer)
-  const eqId    = seg(cardRow.eq_id)
+  const eqId     = seg(cardRow.eq_id)
 
   let sections: (Paragraph | object)[]
   let filename: string
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       normalizeFieldServiceContent(docRow.content) as FieldServiceContent,
       docRow.report_date,
     )
-    filename = `${date}_${customer}_${eqId}_field-service.docx`
+    filename = `${date}_${docType}_${customer}_${eqId}_field-service.docx`
 
   } else if (cardRow.type === 'installation') {
     // Fetch gantt payload for this card
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
       docRow.report_date,
       ganttTasks,
     )
-    filename = `${date}_${customer}_${eqId}_installation.docx`
+    filename = `${date}_${docType}_${customer}_${eqId}_installation.docx`
 
   } else {
     return err('Unsupported card type', 400)
