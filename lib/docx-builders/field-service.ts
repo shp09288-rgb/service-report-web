@@ -211,7 +211,7 @@ function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, log
     borders: BORDERS,
     rows: [
       new TableRow({
-        height: { value: 900 },
+        height: { value: 900, rule: 'auto' },
         children: [
           new TableCell({
             width: { size: logoCol, type: WidthType.DXA },
@@ -263,7 +263,7 @@ function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, log
     borders: BORDERS,
     rows: [
       new TableRow({
-        height: { value: 450 },
+        height: { value: 450, rule: 'exact' },
         children: [
           cell({
             text: 'Report Date:',
@@ -282,7 +282,7 @@ function buildTitleAndMeta(content: FieldServiceContent, reportDate: string, log
         ],
       }),
       new TableRow({
-        height: { value: 450 },
+        height: { value: 450, rule: 'exact' },
         children: [
           cell({
             text: "Park FSE's Name:",
