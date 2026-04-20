@@ -165,7 +165,7 @@ function cell({
   bold?: boolean
   align?: (typeof AlignmentType)[keyof typeof AlignmentType]
   margins?: { top: number; bottom: number; left: number; right: number }
-  verticalAlign?: (typeof VerticalAlign)[keyof typeof VerticalAlign]
+  verticalAlign?: 'top' | 'center' | 'bottom'
   borders?: typeof CELL_BORDERS
   verticalMerge?: (typeof VerticalMergeType)[keyof typeof VerticalMergeType]
 }): TableCell {
