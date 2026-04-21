@@ -104,7 +104,7 @@ interface CellMap {
   data_location: [number, number]
 }
 
-const MAP_A: CellMap = {
+export const MAP_A: CellMap = {
   report_date:   [21, 3],  // V4
   fse_name:      [21, 4],  // V5
   tool_status:   [8,  4],  // I5
