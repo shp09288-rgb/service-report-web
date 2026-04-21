@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { parseWorkbook, detectTemplate } from '@/lib/excel-parser'
+import { parseWorkbook } from '@/lib/excel-parser'
 import type { ParsedSheet } from '@/lib/excel-parser'
 import type { CardRow } from '@/types/db'
 

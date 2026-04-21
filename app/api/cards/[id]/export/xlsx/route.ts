@@ -132,7 +132,7 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     ? await zip.file(`xl/drawings/_rels/drawing${drawingNumStr}.xml.rels`)?.async('text') ?? null
     : null
 
-  let contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
+  const contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
 
   const sheetEntries:  string[] = []
   const wsRelEntries:  string[] = []
