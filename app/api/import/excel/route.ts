@@ -10,33 +10,49 @@ function err(message: string, status = 400) {
 
 // ── Card resolution ───────────────────────────────────────────────────────────
 
-async function resolveCardId(content: ParsedSheet['content']): Promise<string> {
+async function resolveCardId(content: ParsedSheet['content']): Promise<{ id: string; created: boolean }> {
   const eq_id    = content.eq_id.trim()
   const customer = content.customer.trim()
   const model    = content.model.trim()
+  const sid      = content.sid?.trim() ?? ''
 
+  // 1. Match by eq_id (most specific)
   if (eq_id) {
     const { data } = await supabaseAdmin.from('cards').select('id').eq('eq_id', eq_id).maybeSingle()
-    if (data) return data.id
+    if (data) return { id: data.id, created: false }
   }
+  // 2. Match by customer + model + sid (highly specific)
+  if (customer && model && sid) {
+    const { data } = await supabaseAdmin.from('cards')
+      .select('id').eq('customer', customer).eq('model', model).eq('sid', sid)
+      .eq('type', 'field_service').maybeSingle()
+    if (data) return { id: data.id, created: false }
+  }
+  // 3. Match by customer + model
   if (customer && model) {
     const { data } = await supabaseAdmin.from('cards')
       .select('id').eq('customer', customer).eq('model', model).eq('type', 'field_service')
       .maybeSingle()
-    if (data) return data.id
+    if (data) return { id: data.id, created: false }
   }
 
-  const insert: Omit<CardRow, 'id' | 'created_at' | 'updated_at' | 'site' | 'equipment'> = {
-    type:     'field_service',
-    customer: customer || 'Unknown',
-    model:    model    || 'Unknown',
-    sid:      content.sid      || '',
-    eq_id:    eq_id            || '',
-    location: content.location || '',
-  }
-  const { data: newCard, error } = await supabaseAdmin.from('cards').insert(insert).select('id').single()
+  // No match — create new card
+  // site/equipment are legacy NOT NULL columns kept for DB compatibility
+  const customerVal = customer || 'Unknown'
+  const modelVal    = model    || 'Unknown'
+  const { data: newCard, error } = await supabaseAdmin.from('cards').insert({
+    type:      'field_service',
+    customer:  customerVal,
+    model:     modelVal,
+    sid:       sid,
+    eq_id:     eq_id,
+    location:  content.location || '',
+    site:      customerVal,   // legacy NOT NULL — mirrors customer
+    equipment: modelVal,      // legacy NOT NULL — mirrors model
+  } as Omit<CardRow, 'id' | 'created_at' | 'updated_at'>).select('id').single()
+
   if (error || !newCard) throw new Error(`Failed to create card: ${error?.message}`)
-  return newCard.id
+  return { id: newCard.id, created: true }
 }
 
 // ── Preview response shape ────────────────────────────────────────────────────
@@ -62,9 +78,11 @@ export interface ImportPreviewResponse {
 }
 
 export interface ImportCommitResponse {
-  inserted: number
-  skipped:  number
-  errors:   string[]
+  inserted:      number
+  skipped:       number
+  cards_created: number
+  cards_matched: number
+  errors:        string[]
 }
 
 // ── POST /api/import/excel ────────────────────────────────────────────────────
@@ -163,8 +181,10 @@ export async function POST(req: NextRequest) {
     ? result.parsed.filter(p => onlySheets.includes(p.sheet_name))
     : result.parsed
 
-  let inserted = 0
+  let inserted     = 0
   let skippedCount = 0
+  let cardsCreated = 0
+  let cardsMatched = 0
   const errors: string[] = []
 
   for (const parsed of toCommit) {
@@ -178,7 +198,8 @@ export async function POST(req: NextRequest) {
 
       if (existing) { skippedCount++; continue }
 
-      const cardId = await resolveCardId(parsed.content)
+      const { id: cardId, created } = await resolveCardId(parsed.content)
+      if (created) cardsCreated++; else cardsMatched++
 
       const { error: insertError } = await supabaseAdmin.from('documents').insert({
         card_id:            cardId,
@@ -200,7 +221,11 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const response: ImportCommitResponse = { inserted, skipped: skippedCount, errors }
+  const response: ImportCommitResponse = {
+    inserted, skipped: skippedCount,
+    cards_created: cardsCreated, cards_matched: cardsMatched,
+    errors,
+  }
   return NextResponse.json(response)
 }
 

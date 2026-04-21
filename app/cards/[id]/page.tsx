@@ -6,6 +6,21 @@ import Link from 'next/link'
 import type { CardRow, DocumentRow } from '@/types/db'
 import { defaultFieldServiceContent, defaultInstallationContent } from '@/lib/content-defaults'
 
+async function downloadBlob(url: string, filename: string): Promise<string | null> {
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    return (body as { error?: string }).error ?? `Export failed (${res.status})`
+  }
+  const blob = await res.blob()
+  const href = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href = href; a.download = filename
+  document.body.appendChild(a); a.click(); document.body.removeChild(a)
+  URL.revokeObjectURL(href)
+  return null
+}
+
 type Params = Promise<{ id: string }>
 
 // ── Search utilities ──────────────────────────────────────────
@@ -201,6 +216,21 @@ export default function CardPage({ params }: { params: Params }) {
   const [creating, setCreating]       = useState(false)
   const [createError, setCreateError] = useState('')
 
+  const [exporting, setExporting]     = useState(false)
+  const [exportError, setExportError] = useState('')
+
+  async function handleExportXlsx() {
+    if (!card) return
+    setExporting(true)
+    setExportError('')
+    const err = await downloadBlob(
+      `/api/cards/${id}/export/xlsx`,
+      `${card.customer}_${card.eq_id}_field-service-reports.xlsx`,
+    )
+    if (err) setExportError(err)
+    setExporting(false)
+  }
+
   // ── Search state (initialised from URL query params) ─────────
   const [dateFilter, setDateFilter]       = useState(() => searchParams.get('date')    ?? '')
   const [keywordFilter, setKeywordFilter] = useState(() => searchParams.get('keyword') ?? '')
@@ -353,6 +383,15 @@ export default function CardPage({ params }: { params: Params }) {
                 Gantt Chart →
               </Link>
             )}
+            {card!.type === 'field_service' && (
+              <button
+                onClick={handleExportXlsx}
+                disabled={exporting}
+                className="text-sm border border-green-600 text-green-700 rounded px-4 py-2 hover:bg-green-50 disabled:opacity-50 transition-colors"
+              >
+                {exporting ? 'Exporting…' : 'Export Reports (.xlsx)'}
+              </button>
+            )}
             <button
               onClick={openModal}
               className="bg-blue-600 text-white text-sm px-4 py-2 rounded hover:bg-blue-700 transition-colors"
@@ -362,6 +401,13 @@ export default function CardPage({ params }: { params: Params }) {
           </div>
         </div>
       </div>
+
+      {/* Export error */}
+      {exportError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-2">
+          {exportError}
+        </div>
+      )}
 
       {/* Document list */}
       {docs.length === 0 ? (

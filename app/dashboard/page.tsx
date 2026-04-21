@@ -76,7 +76,7 @@ export default function DashboardPage() {
     file_name: string; total_sheets: number; date_sheets: number
     skipped: string[]; previews: SheetPreview[]
   }
-  interface ImportResult { inserted: number; skipped: number; errors: string[] }
+  interface ImportResult { inserted: number; skipped: number; cards_created: number; cards_matched: number; errors: string[] }
 
   const [importStage, setImportStage]     = useState<ImportStage>('idle')
   const [importError, setImportError]     = useState('')
@@ -785,9 +785,14 @@ export default function DashboardPage() {
             {importStage === 'done' && importResult && (
               <>
                 <div className="px-6 py-5 space-y-3">
-                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-lg px-4 py-3">
-                    Import complete — inserted: <strong>{importResult.inserted}</strong>,
-                    skipped (duplicates): <strong>{importResult.skipped}</strong>
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-lg px-4 py-3 space-y-1">
+                    <p className="font-medium">Import complete</p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs mt-1">
+                      <span>Reports inserted</span><span className="font-semibold">{importResult.inserted}</span>
+                      <span>Duplicates skipped</span><span className="font-semibold">{importResult.skipped}</span>
+                      <span>New cards created</span><span className="font-semibold">{importResult.cards_created ?? 0}</span>
+                      <span>Matched existing cards</span><span className="font-semibold">{importResult.cards_matched ?? 0}</span>
+                    </div>
                   </div>
                   {importResult.errors.length > 0 && (
                     <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">

@@ -27,16 +27,23 @@ dotenv.config({ path: path.join(process.cwd(), '.env.local') })
 
 async function resolveCard(content: ParsedSheet['content']): Promise<string> {
   const { createClient } = await import('@supabase/supabase-js')
-  const url  = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const key  = process.env.SUPABASE_SERVICE_ROLE_KEY!
+  const url   = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const key   = process.env.SUPABASE_SERVICE_ROLE_KEY!
   const admin = createClient(url, key)
 
   const eq_id    = content.eq_id.trim()
   const customer = content.customer.trim()
   const model    = content.model.trim()
+  const sid      = content.sid?.trim() ?? ''
 
   if (eq_id) {
     const { data } = await admin.from('cards').select('id').eq('eq_id', eq_id).maybeSingle()
+    if (data) return data.id
+  }
+  if (customer && model && sid) {
+    const { data } = await admin.from('cards')
+      .select('id').eq('customer', customer).eq('model', model).eq('sid', sid)
+      .eq('type', 'field_service').maybeSingle()
     if (data) return data.id
   }
   if (customer && model) {
@@ -46,13 +53,17 @@ async function resolveCard(content: ParsedSheet['content']): Promise<string> {
     if (data) return data.id
   }
 
+  const customerVal = customer || 'Unknown'
+  const modelVal    = model    || 'Unknown'
   const { data: newCard, error } = await admin.from('cards').insert({
-    type:     'field_service',
-    customer: customer || 'Unknown',
-    model:    model    || 'Unknown',
-    sid:      content.sid      || '',
-    eq_id:    eq_id            || '',
-    location: content.location || '',
+    type:      'field_service',
+    customer:  customerVal,
+    model:     modelVal,
+    sid,
+    eq_id,
+    location:  content.location || '',
+    site:      customerVal,   // legacy NOT NULL — mirrors customer
+    equipment: modelVal,      // legacy NOT NULL — mirrors model
   }).select('id').single()
 
   if (error || !newCard) throw new Error(`Failed to create card: ${error?.message}`)
