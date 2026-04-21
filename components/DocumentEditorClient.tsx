@@ -92,8 +92,9 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
   }, [syncedDocId])
 
   // ── Export ───────────────────────────────────────────────────
-  const [exporting, setExporting]   = useState(false)
-  const [exportError, setExportError] = useState('')
+  const [exporting, setExporting]       = useState(false)
+  const [exportingXlsx, setExportingXlsx] = useState(false)
+  const [exportError, setExportError]   = useState('')
 
   // ── Load document + card ─────────────────────────────────────
   useEffect(() => {
@@ -164,6 +165,37 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
       setExportError('Network error during export.')
     } finally {
       setExporting(false)
+    }
+  }
+
+  async function handleExportXlsx() {
+    if (!doc || !card) return
+    setExportingXlsx(true)
+    setExportError('')
+    try {
+      const res = await fetch('/api/export/xlsx', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ documentId: docId }),
+      })
+      if (!res.ok) {
+        const body = await res.json()
+        setExportError(body.error ?? 'Excel export failed.')
+        return
+      }
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `field-service-${doc.report_date}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      setExportError('Network error during Excel export.')
+    } finally {
+      setExportingXlsx(false)
     }
   }
 
@@ -374,7 +406,18 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
             </Link>
           )}
 
-          {/* Export */}
+          {/* Export .xlsx — field_service only */}
+          {card!.type === 'field_service' && (
+            <button
+              onClick={handleExportXlsx}
+              disabled={exportingXlsx}
+              className="text-sm border border-green-600 text-green-700 rounded px-3 py-1.5 hover:bg-green-50 disabled:opacity-50 transition-colors"
+            >
+              {exportingXlsx ? 'Exporting…' : 'Export .xlsx'}
+            </button>
+          )}
+
+          {/* Export .docx */}
           <button
             onClick={handleExport}
             disabled={exporting}
