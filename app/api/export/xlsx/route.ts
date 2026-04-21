@@ -22,42 +22,31 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;')
 }
 
-/**
- * Patch a single cell in raw worksheet XML.
- * Converts the target cell to t="inlineStr" so we never touch sharedStrings.xml.
- * Style attribute (s="N") is preserved as-is.
- */
 function patchCell(xml: string, addr: string, value: string): string {
   const escaped = escapeXml(value)
-  const inner   = value ? `<is><t>${escaped}</t></is>` : ''
+  // xml:space="preserve" prevents Excel from stripping leading/trailing whitespace in long text
+  const inner   = value ? `<is><t xml:space="preserve">${escaped}</t></is>` : ''
   const tAttr   = value ? ' t="inlineStr"' : ''
 
-  // Find r="ADDR" in the XML — unique to the <c> element for this address
   const marker    = `r="${addr}"`
   const markerIdx = xml.indexOf(marker)
 
   if (markerIdx !== -1) {
-    // Walk back to find the opening '<c'
     let start = markerIdx
     while (start > 0 && xml[start] !== '<') start--
 
-    // Find end of opening tag
     let openEnd = markerIdx + marker.length
     while (openEnd < xml.length && xml[openEnd] !== '>') openEnd++
-    openEnd++ // include '>'
+    openEnd++
 
-    // Determine close of element
     let end: number
     if (xml[openEnd - 2] === '/') {
-      // Self-closing <c ... />
       end = openEnd
     } else {
-      // <c ...>...</c>
       const closeIdx = xml.indexOf('</c>', openEnd)
       end = closeIdx === -1 ? openEnd : closeIdx + 4
     }
 
-    // Extract opening tag attributes, strip t="...", rebuild
     const openTag = xml.slice(start, openEnd)
     const attrsMatch = openTag.match(/^<c([\s\S]*?)(?:\s*\/?>)$/)
     const rawAttrs  = attrsMatch ? attrsMatch[1] : ` r="${addr}"`
@@ -66,7 +55,6 @@ function patchCell(xml: string, addr: string, value: string): string {
     return xml.slice(0, start) + `<c${cleanAttrs}${tAttr}>${inner}</c>` + xml.slice(end)
   }
 
-  // Cell doesn't exist — insert into existing row or create row
   const rowIdx   = XLSX.utils.decode_cell(addr).r
   const excelRow = rowIdx + 1
   const newCell  = `<c r="${addr}"${tAttr}>${inner}</c>`
@@ -78,8 +66,50 @@ function patchCell(xml: string, addr: string, value: string): string {
     return xml.slice(0, pos) + newCell + xml.slice(pos)
   }
 
-  // Row doesn't exist — prepend before </sheetData>
   return xml.replace('</sheetData>', `<row r="${excelRow}">${newCell}</row></sheetData>`)
+}
+
+// Add wrapText="1" to a style index in styles.xml
+function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
+  let result = stylesXml
+  // Parse all <xf ...> elements in <cellXfs> section
+  const cellXfsMatch = result.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
+  if (!cellXfsMatch) return result
+
+  const cellXfsContent = cellXfsMatch[1]
+  // Split into individual xf tokens, tracking position
+  const xfPattern = /<xf\b([\s\S]*?)(?:\/>|>[\s\S]*?<\/xf>)/g
+  let xfIndex = 0
+  const toModify = new Set(styleIndices)
+
+  const newCellXfs = cellXfsContent.replace(xfPattern, (match) => {
+    const idx = xfIndex++
+    if (!toModify.has(idx)) return match
+
+    // Already has wrapText — leave unchanged
+    if (match.includes('wrapText="1"')) return match
+
+    if (match.includes('<alignment')) {
+      // Add wrapText to existing alignment element
+      return match.replace('<alignment', '<alignment wrapText="1"')
+    } else if (match.includes('/>')) {
+      // Self-closing <xf .../> — inject alignment before closing
+      return match.replace('/>', '><alignment wrapText="1"/></xf>')
+    } else {
+      // <xf ...>...</xf> without alignment — inject before </xf>
+      return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
+    }
+  })
+
+  return result.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
+}
+
+// Set a row's height (removes customHeight if present, sets new ht)
+function setRowHeight(xml: string, excelRow: number, ht: number): string {
+  return xml.replace(
+    new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*?)(?:\\s+customHeight="[^"]*")?(?:\\s+ht="[^"]*")?([^>]*>)`),
+    (_, before, after) => `${before} customHeight="1" ht="${ht}"${after}`
+  )
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -108,7 +138,6 @@ export async function POST(req: NextRequest) {
 
   const content = normalizeFieldServiceContent(docRow.content) as FieldServiceContent
 
-  // Load template as raw ZIP — all styles/images/merges are preserved untouched
   const templatePath = path.join(
     process.cwd(), 'references', 'Park Systems Field Service Passdown Report.xlsx'
   )
@@ -121,7 +150,6 @@ export async function POST(req: NextRequest) {
 
   const zip = await JSZip.loadAsync(templateBuffer)
 
-  // Resolve first sheet file via workbook.xml → workbook.xml.rels
   const wbXml     = await zip.file('xl/workbook.xml')?.async('text') ?? ''
   const wbRelsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
 
@@ -135,7 +163,6 @@ export async function POST(req: NextRequest) {
   let sheetXml = await zip.file(sheetFile)?.async('text')
   if (!sheetXml) return err('Template worksheet not found', 500)
 
-  // Build cell-address → value list from MAP_A + document content
   const enc = ([col, row]: [number, number]) => XLSX.utils.encode_cell({ r: row, c: col })
   const updates: [string, string][] = [
     [enc(MAP_A.report_date),   docRow.report_date],
@@ -166,10 +193,19 @@ export async function POST(req: NextRequest) {
     sheetXml = patchCell(sheetXml, addr, value)
   }
 
-  // Write patched sheet back (only this file changes; all others are untouched)
+  // Expand rows 16-21 (problem/target merged area) so long text is visible
+  for (let r = 16; r <= 21; r++) {
+    sheetXml = setRowHeight(sheetXml, r, 40)
+  }
+
   zip.file(sheetFile, sheetXml)
 
-  // Rename sheet tab to YYYY.MM.DD in workbook.xml
+  // Patch styles.xml — add wrapText to styles 68 (B16/problem), 70 (N16/target), 78 (B23/daily_note)
+  const stylesXml = await zip.file('xl/styles.xml')?.async('text')
+  if (stylesXml) {
+    zip.file('xl/styles.xml', addWrapTextToStyles(stylesXml, [68, 70, 78]))
+  }
+
   const sheetTabName  = docRow.report_date.replace(/-/g, '.')
   const updatedWbXml  = wbXml.replace(
     /(<sheet\b[^>]*\bname=")[^"]*(")/,

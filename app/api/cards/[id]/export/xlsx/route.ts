@@ -22,7 +22,8 @@ function escapeXml(s: string): string {
 
 function patchCell(xml: string, addr: string, value: string): string {
   const escaped = escapeXml(value)
-  const inner   = value ? `<is><t>${escaped}</t></is>` : ''
+  // xml:space="preserve" prevents Excel from stripping whitespace in long text
+  const inner   = value ? `<is><t xml:space="preserve">${escaped}</t></is>` : ''
   const tAttr   = value ? ' t="inlineStr"' : ''
 
   const marker    = `r="${addr}"`
@@ -53,6 +54,42 @@ function patchCell(xml: string, addr: string, value: string): string {
     return xml.slice(0, pos) + newCell + xml.slice(pos)
   }
   return xml.replace('</sheetData>', `<row r="${excelRow}">${newCell}</row></sheetData>`)
+}
+
+// Set a row's height in sheet XML
+function setRowHeight(xml: string, excelRow: number, ht: number): string {
+  return xml.replace(
+    new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*?)(?:\\s+customHeight="[^"]*")?(?:\\s+ht="[^"]*")?([^>]*>)`),
+    (_, before, after) => `${before} customHeight="1" ht="${ht}"${after}`
+  )
+}
+
+// Add wrapText="1" to specific style indices in styles.xml
+function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
+  let result = stylesXml
+  const cellXfsMatch = result.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
+  if (!cellXfsMatch) return result
+
+  const cellXfsContent = cellXfsMatch[1]
+  const xfPattern = /<xf\b([\s\S]*?)(?:\/>|>[\s\S]*?<\/xf>)/g
+  let xfIndex = 0
+  const toModify = new Set(styleIndices)
+
+  const newCellXfs = cellXfsContent.replace(xfPattern, (match) => {
+    const idx = xfIndex++
+    if (!toModify.has(idx)) return match
+    if (match.includes('wrapText="1"')) return match
+
+    if (match.includes('<alignment')) {
+      return match.replace('<alignment', '<alignment wrapText="1"')
+    } else if (match.includes('/>')) {
+      return match.replace('/>', '><alignment wrapText="1"/></xf>')
+    } else {
+      return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
+    }
+  })
+
+  return result.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
 }
 
 function buildUpdates(content: FieldServiceContent, reportDate: string): [string, string][] {
@@ -97,7 +134,7 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { data: docs } = await supabaseAdmin
     .from('documents').select('*')
     .eq('card_id', cardId).eq('is_external', false)
-    .order('report_date', { ascending: true })
+    .order('report_date', { ascending: false })  // newest first
 
   if (!docs || docs.length === 0) return errRes('No internal reports found for this card', 404)
 
@@ -122,7 +159,13 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const tmplXml = await zip.file(tmplFile)?.async('text')
   if (!tmplXml) return errRes('Template worksheet not found in file', 500)
 
-  // Check if template sheet has drawing (logo)
+  // Patch styles.xml once — add wrapText to styles 68 (problem), 70 (target), 78 (daily_note)
+  const stylesXml = await zip.file('xl/styles.xml')?.async('text')
+  if (stylesXml) {
+    zip.file('xl/styles.xml', addWrapTextToStyles(stylesXml, [68, 70, 78]))
+  }
+
+  // Check if template has drawing (logo image) — we clone it per sheet
   const tmplSheetRels = await zip.file(`xl/worksheets/_rels/sheet${tmplSheetNum}.xml.rels`)?.async('text') ?? null
   const drawingNumStr = tmplSheetRels?.match(/drawings\/drawing(\d+)\.xml/)?.[1] ?? null
   const drawingXml    = drawingNumStr
@@ -131,6 +174,12 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const drawingRels   = drawingNumStr
     ? await zip.file(`xl/drawings/_rels/drawing${drawingNumStr}.xml.rels`)?.async('text') ?? null
     : null
+
+  // Strip legacyDrawing (vmlDrawing/comments) from template sheet XML to avoid
+  // Excel "repair" errors when multiple sheets reference the same vml file.
+  const tmplXmlClean = tmplXml
+    .replace(/<legacyDrawing\b[^/]*\/>/g, '')
+    .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
 
   const contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
 
@@ -146,23 +195,31 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     const tabName = docRow.report_date.replace(/-/g, '.')          // YYYY.MM.DD
 
     // Patch template XML for this document's data
-    let patchedXml = tmplXml
+    let patchedXml = tmplXmlClean
     for (const [addr, value] of buildUpdates(content, docRow.report_date)) {
       patchedXml = patchCell(patchedXml, addr, value)
     }
+
+    // Expand rows 16-21 (problem/target merged area) for long text
+    for (let r = 16; r <= 21; r++) {
+      patchedXml = setRowHeight(patchedXml, r, 40)
+    }
+
     zip.file(`xl/worksheets/sheet${n}.xml`, patchedXml)
 
-    // Clone drawing (logo) for each sheet so all sheets render the header image
-    if (drawingNumStr && tmplSheetRels && drawingXml && drawingRels) {
+    // Clone drawing (logo) for each sheet — use drawing-only rels (no vmlDrawing)
+    if (drawingNumStr && drawingXml && drawingRels) {
       zip.file(`xl/drawings/drawing${n}.xml`, drawingXml)
       zip.file(`xl/drawings/_rels/drawing${n}.xml.rels`, drawingRels)
-      const patchedSheetRels = tmplSheetRels.replace(
-        /drawings\/drawing\d+\.xml/g,
-        `drawings/drawing${n}.xml`
-      )
-      zip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, patchedSheetRels)
+
+      // Sheet rels: only the drawing relationship, no vmlDrawing or comments
+      const sheetRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${n}.xml"/>
+</Relationships>`
+      zip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, sheetRelsXml)
+
       if (n > 1) {
-        // sheet1 entries already exist in Content_Types; only add for n≥2
         ctAddEntries.push(
           `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
           `<Override PartName="/xl/drawings/drawing${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
