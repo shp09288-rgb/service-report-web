@@ -37,9 +37,19 @@ const MMDD_SHEET = /^\d{4}(_\d+)?$/
 
 export function detectTemplate(sheetName: string): TemplateType | null {
   if (/^\d{4}\.\d{2}\.\d{2}$/.test(sheetName)) return 'A'
-  if (/^\d{6}$/.test(sheetName)) return 'B'
+  if (/^\d{6}$/.test(sheetName)) return 'B'   // may be overridden by detectLayout
   if (MMDD_SHEET.test(sheetName)) return 'A'
   return null
+}
+
+// Some YYMMDD files use Template A cell layout (older format).
+// If D9 (Template B customer cell) is empty, fall back to Template A layout.
+export function detectLayout(ws: XLSX.WorkSheet, sheetName: string): TemplateType {
+  const tpl = detectTemplate(sheetName)
+  if (tpl !== 'B') return tpl ?? 'A'
+  // YYMMDD: check actual customer cell positions
+  const custB = cv(ws, 3, 8)  // D9 — Template B value position
+  return custB ? 'B' : 'A'
 }
 
 export function parseDateFromSheet(name: string, tpl: TemplateType): string {
@@ -246,17 +256,17 @@ async function parseSheet(
   fileName: string,
   sheetName: string,
 ): Promise<ParsedSheet | null> {
-  const tpl = detectTemplate(sheetName)
-  if (!tpl) return null
+  if (!detectTemplate(sheetName)) return null
   const ws = wb.Sheets[sheetName]
   if (!ws) return null
 
+  // detectLayout auto-corrects YYMMDD sheets that use Template A cell positions
+  const tpl = detectLayout(ws, sheetName)
   const map = tpl === 'B' ? MAP_B : MAP_A
   const r = (key: keyof CellMap) => cv(ws, map[key][0], map[key][1])
 
-  // MMDD sheets (4-digit tab name) can't derive the year from the sheet name;
-  // use the V4/W4 report_date cell which always contains the full date.
-  const reportDate = MMDD_SHEET.test(sheetName)
+  // MMDD/YYMMDD-as-A sheets: derive date from V4 cell (contains full date serial)
+  const reportDate = (MMDD_SHEET.test(sheetName) || (tpl === 'A' && /^\d{6}$/.test(sheetName)))
     ? toDateISO(r('report_date'))
     : parseDateFromSheet(sheetName, tpl)
   const dailyNote  = r('daily_note')
