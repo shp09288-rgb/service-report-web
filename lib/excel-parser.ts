@@ -31,9 +31,14 @@ export interface WorkbookParseResult {
 
 export type TemplateType = 'A' | 'B'
 
+// MMDD_SHEET: 4-digit MMDD (e.g. "1217") or MMDD with numeric suffix (e.g. "0416_2").
+// These sheets use Template A cell layout; the actual date comes from the V4 cell.
+const MMDD_SHEET = /^\d{4}(_\d+)?$/
+
 export function detectTemplate(sheetName: string): TemplateType | null {
   if (/^\d{4}\.\d{2}\.\d{2}$/.test(sheetName)) return 'A'
   if (/^\d{6}$/.test(sheetName)) return 'B'
+  if (MMDD_SHEET.test(sheetName)) return 'A'
   return null
 }
 
@@ -249,7 +254,11 @@ async function parseSheet(
   const map = tpl === 'B' ? MAP_B : MAP_A
   const r = (key: keyof CellMap) => cv(ws, map[key][0], map[key][1])
 
-  const reportDate = parseDateFromSheet(sheetName, tpl)
+  // MMDD sheets (4-digit tab name) can't derive the year from the sheet name;
+  // use the V4/W4 report_date cell which always contains the full date.
+  const reportDate = MMDD_SHEET.test(sheetName)
+    ? toDateISO(r('report_date'))
+    : parseDateFromSheet(sheetName, tpl)
   const dailyNote  = r('daily_note')
 
   let noteImages: NoteImage[] = []
