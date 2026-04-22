@@ -16,6 +16,16 @@ function errRes(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status })
 }
 
+async function removeExternalDefinedNames(buf: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buf)
+  const wbXml = await zip.file('xl/workbook.xml')?.async('text')
+  if (!wbXml) return buf
+  const fixed = wbXml.replace(/<definedName\b[^>]*>[^<]*\[\d+\][^<]*<\/definedName>/g, '')
+  if (fixed === wbXml) return buf
+  zip.file('xl/workbook.xml', fixed)
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
+}
+
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
@@ -76,7 +86,7 @@ async function generateSheetBuffer(
   const ws = wb.worksheets[0]
   ws.name = tabName
   applyContent(ws, content, reportDate)
-  return Buffer.from(await wb.xlsx.writeBuffer())
+  return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
 
 // Remove drawing/legacyDrawing tags from sheet XML (self-closing only — safe targeted removal)

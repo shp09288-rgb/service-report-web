@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 import * as XLSX from 'xlsx'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -11,6 +12,16 @@ import type { FieldServiceContent } from '@/types/report'
 
 function err(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
+}
+
+async function removeExternalDefinedNames(buf: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buf)
+  const wbXml = await zip.file('xl/workbook.xml')?.async('text')
+  if (!wbXml) return buf
+  const fixed = wbXml.replace(/<definedName\b[^>]*>[^<]*\[\d+\][^<]*<\/definedName>/g, '')
+  if (fixed === wbXml) return buf
+  zip.file('xl/workbook.xml', fixed)
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
 }
 
 // Convert 0-indexed [col, row] from MAP_A to Excel cell address ('B16' etc.)
@@ -99,8 +110,7 @@ export async function POST(req: NextRequest) {
   ws.name = docRow.report_date.replace(/-/g, '.')
   applyContent(ws, content, docRow.report_date)
 
-  // ExcelJS writes a structurally valid xlsx — no manual XML manipulation needed
-  const buf = Buffer.from(await wb.xlsx.writeBuffer())
+  const buf = await removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 
   const seg      = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
   const docType  = docRow.is_external ? 'External' : 'Internal'
