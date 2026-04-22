@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
+import * as XLSX from 'xlsx'
 import * as fs from 'fs'
 import * as path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -20,91 +21,74 @@ function escapeXml(s: string): string {
           .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
-function patchCell(xml: string, addr: string, value: string): string {
-  const escaped = escapeXml(value)
-  const inner   = value ? `<is><t xml:space="preserve">${escaped}</t></is>` : ''
-  const tAttr   = value ? ' t="inlineStr"' : ''
-
-  const marker    = `r="${addr}"`
-  const markerIdx = xml.indexOf(marker)
-
-  if (markerIdx !== -1) {
-    let start = markerIdx
-    while (start > 0 && xml[start] !== '<') start--
-    let openEnd = markerIdx + marker.length
-    while (openEnd < xml.length && xml[openEnd] !== '>') openEnd++
-    openEnd++
-    const end = xml[openEnd - 2] === '/'
-      ? openEnd
-      : (() => { const ci = xml.indexOf('</c>', openEnd); return ci === -1 ? openEnd : ci + 4 })()
-
-    const openTag    = xml.slice(start, openEnd)
-    const attrsMatch = openTag.match(/^<c([\s\S]*?)(?:\s*\/?>)$/)
-    const rawAttrs   = attrsMatch ? attrsMatch[1] : ` r="${addr}"`
-    const cleanAttrs = rawAttrs.replace(/\s+t="[^"]*"/g, '')
-    return xml.slice(0, start) + `<c${cleanAttrs}${tAttr}>${inner}</c>` + xml.slice(end)
-  }
-
-  const excelRow = XLSX.utils.decode_cell(addr).r + 1
-  const newCell  = `<c r="${addr}"${tAttr}>${inner}</c>`
-  const rowMatch = new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*>)`).exec(xml)
-  if (rowMatch) {
-    const pos = rowMatch.index + rowMatch[0].length
-    return xml.slice(0, pos) + newCell + xml.slice(pos)
-  }
-  return xml.replace('</sheetData>', `<row r="${excelRow}">${newCell}</row></sheetData>`)
+function addr([col, row]: [number, number]): string {
+  return XLSX.utils.encode_cell({ r: row, c: col })
 }
 
-function setRowHeight(xml: string, excelRow: number, ht: number): string {
-  return xml.replace(
-    new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*?)(?:\\s+customHeight="[^"]*")?(?:\\s+ht="[^"]*")?([^>]*>)`),
-    (_, before, after) => `${before} customHeight="1" ht="${ht}"${after}`
-  )
+function applyContent(ws: ExcelJS.Worksheet, content: FieldServiceContent, reportDate: string) {
+  const set = (key: [number, number], value: string) => {
+    ws.getCell(addr(key)).value = value
+  }
+
+  set(MAP_A.report_date,   reportDate)
+  set(MAP_A.fse_name,      content.fse_name          ?? '')
+  set(MAP_A.tool_status,   content.tool_status       ?? '')
+  set(MAP_A.customer,      content.customer          ?? '')
+  set(MAP_A.location,      content.location          ?? '')
+  set(MAP_A.crm_case_id,   content.crm_case_id       ?? '')
+  set(MAP_A.model,         content.model             ?? '')
+  set(MAP_A.site_survey,   content.site_survey       ?? '')
+  set(MAP_A.noise_level,   content.noise_level       ?? '')
+  set(MAP_A.main_user,     content.main_user         ?? '')
+  set(MAP_A.sid,           content.sid               ?? '')
+  set(MAP_A.start_date,    content.start_date        ?? '')
+  set(MAP_A.tel,           content.tel               ?? '')
+  set(MAP_A.eq_id,         content.eq_id             ?? '')
+  set(MAP_A.start_time,    content.start_time        ?? '')
+  set(MAP_A.email,         content.email             ?? '')
+  set(MAP_A.service_type,  content.service_type      ?? '')
+  set(MAP_A.end_time,      content.end_time          ?? '')
+  set(MAP_A.problem,       content.problem_statement ?? '')
+  set(MAP_A.target,        content.target_statement  ?? '')
+  set(MAP_A.daily_note,    content.critical_items?.[0]?.note ?? content.daily_note ?? '')
+  set(MAP_A.data_location, content.data_location     ?? '')
+
+  const wrapCells = [MAP_A.problem, MAP_A.target, MAP_A.daily_note]
+  for (const key of wrapCells) {
+    const cell = ws.getCell(addr(key))
+    cell.alignment = { ...(cell.alignment ?? {}), wrapText: true, vertical: 'top', horizontal: 'left' }
+  }
+  for (let r = 16; r <= 21; r++) {
+    const row = ws.getRow(r)
+    if (!row.height || row.height < 40) row.height = 40
+  }
 }
 
-// Strip all drawing/image references from sheet XML
-function stripDrawingRefs(xml: string): string {
+// Generate a single-sheet xlsx buffer via ExcelJS from the template
+async function generateSheetBuffer(
+  templatePath: string,
+  content: FieldServiceContent,
+  reportDate: string,
+  tabName: string,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(templatePath)
+  const ws = wb.worksheets[0]
+  ws.name = tabName
+  applyContent(ws, content, reportDate)
+  return Buffer.from(await wb.xlsx.writeBuffer())
+}
+
+// Remove drawing/legacyDrawing tags from sheet XML (self-closing only — safe targeted removal)
+function stripDrawingTags(xml: string): string {
   return xml
-    .replace(/<drawing\b[^/]*\/>/g, '')
-    .replace(/<drawing\b[^>]*>[\s\S]*?<\/drawing>/g, '')
-    .replace(/<legacyDrawing\b[^/]*\/>/g, '')
-    .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
-}
-
-// Empty rels — replaces template sheet rels that reference drawings
-const EMPTY_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
-
-function buildUpdates(content: FieldServiceContent, reportDate: string): [string, string][] {
-  const enc = ([col, row]: [number, number]) => XLSX.utils.encode_cell({ r: row, c: col })
-  return [
-    [enc(MAP_A.report_date),   reportDate],
-    [enc(MAP_A.fse_name),      content.fse_name          ?? ''],
-    [enc(MAP_A.tool_status),   content.tool_status       ?? ''],
-    [enc(MAP_A.customer),      content.customer          ?? ''],
-    [enc(MAP_A.location),      content.location          ?? ''],
-    [enc(MAP_A.crm_case_id),   content.crm_case_id       ?? ''],
-    [enc(MAP_A.model),         content.model             ?? ''],
-    [enc(MAP_A.site_survey),   content.site_survey       ?? ''],
-    [enc(MAP_A.noise_level),   content.noise_level       ?? ''],
-    [enc(MAP_A.main_user),     content.main_user         ?? ''],
-    [enc(MAP_A.sid),           content.sid               ?? ''],
-    [enc(MAP_A.start_date),    content.start_date        ?? ''],
-    [enc(MAP_A.tel),           content.tel               ?? ''],
-    [enc(MAP_A.eq_id),         content.eq_id             ?? ''],
-    [enc(MAP_A.start_time),    content.start_time        ?? ''],
-    [enc(MAP_A.email),         content.email             ?? ''],
-    [enc(MAP_A.service_type),  content.service_type      ?? ''],
-    [enc(MAP_A.end_time),      content.end_time          ?? ''],
-    [enc(MAP_A.problem),       content.problem_statement ?? ''],
-    [enc(MAP_A.target),        content.target_statement  ?? ''],
-    [enc(MAP_A.daily_note),    content.critical_items?.[0]?.note ?? content.daily_note ?? ''],
-    [enc(MAP_A.data_location), content.data_location     ?? ''],
-  ]
+    .replace(/<drawing\s[^>]*\/>/g, '')
+    .replace(/<legacyDrawing\s[^>]*\/>/g, '')
 }
 
 // GET /api/cards/[id]/export/xlsx
 // Multi-sheet workbook: all internal field_service reports, newest first.
-// All drawing/image references are stripped to prevent Excel repair errors.
+// Each sheet is generated cleanly via ExcelJS; JSZip is used only for structural combination.
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { id: cardId } = await params
 
@@ -121,56 +105,78 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   if (!docs || docs.length === 0) return errRes('No internal reports found for this card', 404)
 
   const templatePath = path.join(process.cwd(), 'references', 'Park Systems Field Service Passdown Report.xlsx')
-  let templateBuffer: Buffer
-  try { templateBuffer = fs.readFileSync(templatePath) }
-  catch { return errRes('Excel template not found on server', 500) }
+  if (!fs.existsSync(templatePath)) return errRes('Excel template not found on server', 500)
 
-  const zip = await JSZip.loadAsync(templateBuffer)
+  // ── Step 1: Generate individual xlsx buffers via ExcelJS (no XML manipulation) ──
 
-  const wbXml     = await zip.file('xl/workbook.xml')?.async('text') ?? ''
-  const wbRelsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
-  const firstRId  = wbXml.match(/<sheet\b[^>]*\br:id="(rId\d+)"/)?.[1]
-  let   tmplFile  = 'xl/worksheets/sheet1.xml'
-  if (firstRId) {
-    const t = wbRelsXml.match(new RegExp(`Id="${firstRId}"[^>]*Target="([^"]+)"`))?.[1]
-    if (t) tmplFile = t.startsWith('xl/') ? t : `xl/${t}`
+  const sheetBufs: Buffer[] = []
+  for (const docRow of docs as DocumentRow[]) {
+    const content = normalizeFieldServiceContent(docRow.content) as FieldServiceContent
+    const tabName = docRow.report_date.replace(/-/g, '.')
+    sheetBufs.push(await generateSheetBuffer(templatePath, content, docRow.report_date, tabName))
   }
 
-  const tmplXml = await zip.file(tmplFile)?.async('text')
-  if (!tmplXml) return errRes('Template worksheet not found in file', 500)
+  // ── Step 2: Combine into multi-sheet workbook via JSZip (structural only) ──
+  //
+  // Strategy:
+  // - Use first buffer as base (keeps styles, theme, shared strings, media, drawing)
+  // - Add sheets 2+ from other buffers
+  // - All sheets 2+: strip <drawing>/<legacyDrawing> tags since they share drawing1.xml
+  //   from the base but we can't safely have multiple rels pointing to the same drawing
+  // - Sheets 2+ have no sheet rels file → no broken drawing references
+  // - workbook.xml / workbook.xml.rels / [Content_Types].xml updated structurally
 
-  // Clear template sheet rels so drawing1.xml is no longer referenced
-  const tmplSheetNum = tmplFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
-  zip.file(`xl/worksheets/_rels/sheet${tmplSheetNum}.xml.rels`, EMPTY_RELS)
+  const baseZip    = await JSZip.loadAsync(sheetBufs[0])
+  const baseWbXml  = await baseZip.file('xl/workbook.xml')?.async('text') ?? ''
+  const baseWbRels = await baseZip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
+  const baseCT     = await baseZip.file('[Content_Types].xml')?.async('text') ?? ''
 
-  // Strip drawing tags from template XML
-  const tmplXmlClean = stripDrawingRefs(tmplXml)
+  // Resolve the first sheet file name in the base zip (ExcelJS uses sheet1.xml)
+  const firstRId    = baseWbXml.match(/<sheet\b[^>]*\br:id="(rId\d+)"/)?.[1]
+  let   baseSheetFile = 'xl/worksheets/sheet1.xml'
+  if (firstRId) {
+    const t = baseWbRels.match(new RegExp(`Id="${firstRId}"[^>]*Target="([^"]+)"`))?.[1]
+    if (t) baseSheetFile = t.startsWith('xl/') ? t : `xl/${t}`
+  }
 
-  const contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
-  const sheetEntries:  string[] = []
-  const wsRelEntries:  string[] = []
-  const ctAddEntries:  string[] = []
+  const sheetEntries: string[] = []
+  const wsRelEntries: string[] = []
+  const ctAddEntries: string[] = []
 
-  for (let i = 0; i < docs.length; i++) {
-    const docRow  = docs[i] as DocumentRow
-    const content = normalizeFieldServiceContent(docRow.content) as FieldServiceContent
+  for (let i = 0; i < sheetBufs.length; i++) {
     const n       = i + 1
     const wsId    = `wsId${n}`
+    const docRow  = (docs as DocumentRow[])[i]
     const tabName = docRow.report_date.replace(/-/g, '.')
 
-    let patchedXml = tmplXmlClean
-    for (const [addr, value] of buildUpdates(content, docRow.report_date)) {
-      patchedXml = patchCell(patchedXml, addr, value)
-    }
-    for (let r = 16; r <= 21; r++) {
-      patchedXml = setRowHeight(patchedXml, r, 40)
-    }
+    if (i === 0) {
+      // First sheet is already in the base zip as baseSheetFile.
+      // Rename to sheet1.xml if it differs (normally it's already sheet1.xml from ExcelJS).
+      if (baseSheetFile !== 'xl/worksheets/sheet1.xml') {
+        const origData = await baseZip.file(baseSheetFile)?.async('uint8array')
+        if (origData) {
+          baseZip.file('xl/worksheets/sheet1.xml', origData)
+          baseZip.remove(baseSheetFile)
+        }
+        const baseSheetNum = baseSheetFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
+        const origRels = await baseZip.file(`xl/worksheets/_rels/sheet${baseSheetNum}.xml.rels`)?.async('uint8array')
+        if (origRels) {
+          baseZip.file('xl/worksheets/_rels/sheet1.xml.rels', origRels)
+          baseZip.remove(`xl/worksheets/_rels/sheet${baseSheetNum}.xml.rels`)
+        }
+      }
+      // sheet1 content type already exists in base [Content_Types].xml
+    } else {
+      // Extract sheet1.xml from this buffer (ExcelJS-generated, valid structure)
+      const sheetZip = await JSZip.loadAsync(sheetBufs[i])
+      const rawXml   = await sheetZip.file('xl/worksheets/sheet1.xml')?.async('text')
 
-    zip.file(`xl/worksheets/sheet${n}.xml`, patchedXml)
+      if (rawXml) {
+        // Remove drawing refs: these sheets don't get their own rels file, so any
+        // drawing reference in the XML would be a dangling relationship → strip it
+        baseZip.file(`xl/worksheets/sheet${n}.xml`, stripDrawingTags(rawXml))
+      }
 
-    // No sheet rels written for any sheet — no drawing references at all
-
-    if (n > 1) {
       ctAddEntries.push(
         `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
       )
@@ -182,21 +188,24 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     )
   }
 
-  zip.file('xl/workbook.xml', wbXml.replace(
+  // Replace <sheets> block in workbook.xml
+  baseZip.file('xl/workbook.xml', baseWbXml.replace(
     /<sheets>[\s\S]*?<\/sheets>/,
     `<sheets>${sheetEntries.join('')}</sheets>`,
   ))
 
-  zip.file('xl/_rels/workbook.xml.rels', wbRelsXml
+  // Replace worksheet relationships in workbook.xml.rels
+  baseZip.file('xl/_rels/workbook.xml.rels', baseWbRels
     .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
     .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
   )
 
+  // Add content type entries for sheets 2+
   if (ctAddEntries.length > 0) {
-    zip.file('[Content_Types].xml', contentTypesXml.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
+    baseZip.file('[Content_Types].xml', baseCT.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
   }
 
-  const buf      = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  const buf      = await baseZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
   const seg      = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
   const filename = `${seg(cardRow.customer)}_${seg(cardRow.eq_id)}_field-service-reports.xlsx`
 

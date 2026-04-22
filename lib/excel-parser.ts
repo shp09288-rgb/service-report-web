@@ -157,6 +157,11 @@ const MAP_B: CellMap = {
 // ── Image extraction ──────────────────────────────────────────────────────────
 // Path: workbook.xml + workbook.xml.rels → sheetN.xml → drawingM.xml → media
 
+// Rows 0-6 (Excel rows 1-7) are considered the template header/logo area.
+// Images anchored in this region are excluded from note_images to prevent
+// the template logo from being imported as report content.
+const HEADER_ROW_LIMIT = 7
+
 async function extractSheetImages(
   fileBuffer: Buffer,
   sheetName: string,
@@ -184,18 +189,45 @@ async function extractSheetImages(
   const drawingMatch = sheetRelsXml.match(/drawings\/drawing(\d+)\.xml/)
   if (!drawingMatch) return []
 
-  const drawingRels = zip.file(`xl/drawings/_rels/drawing${drawingMatch[1]}.xml.rels`)
+  const drawingNum    = drawingMatch[1]
+  const drawingRels   = zip.file(`xl/drawings/_rels/drawing${drawingNum}.xml.rels`)
   if (!drawingRels) return []
   const drawingRelsXml = await drawingRels.async('text')
 
+  // Parse drawing XML to find the anchor start-row for each relationship ID.
+  // Images anchored entirely within the header area (rows 0-6) are the template
+  // logo and should not be included in note_images.
+  const drawingXml    = await zip.file(`xl/drawings/drawing${drawingNum}.xml`)?.async('text') ?? ''
+  const rIdToFromRow: Record<string, number> = {}
+
+  const anchorPattern = /<xdr:(?:twoCellAnchor|oneCellAnchor)\b[^>]*>([\s\S]*?)<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g
+  for (const m of drawingXml.matchAll(anchorPattern)) {
+    const block    = m[1]
+    const fromRow  = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/)?.[1]
+    const embedRId = block.match(/r:embed="(rId\d+)"/)?.[1] ?? block.match(/r:link="(rId\d+)"/)?.[1]
+    if (fromRow !== undefined && embedRId) {
+      rIdToFromRow[embedRId] = parseInt(fromRow, 10)
+    }
+  }
+
+  // Build rId → media filename map from drawing rels
+  const rIdToMedia: Record<string, string> = {}
+  for (const m of drawingRelsXml.matchAll(/Id="(rId\d+)"[^>]*Target="\.\.\/media\/([^"]+)"/g)) {
+    rIdToMedia[m[1]] = m[2]
+  }
+
   const images: NoteImage[] = []
-  for (const m of drawingRelsXml.matchAll(/Target="\.\.\/media\/([^"]+)"/g)) {
-    const imgFile = zip.file(`xl/media/${m[1]}`)
+  for (const [rId, mediaFile] of Object.entries(rIdToMedia)) {
+    // Skip header/logo images (anchor starts within header row range)
+    const fromRow = rIdToFromRow[rId] ?? HEADER_ROW_LIMIT
+    if (fromRow < HEADER_ROW_LIMIT) continue
+
+    const imgFile = zip.file(`xl/media/${mediaFile}`)
     if (!imgFile) continue
-    const ext = m[1].split('.').pop()?.toLowerCase() ?? 'png'
+    const ext  = mediaFile.split('.').pop()?.toLowerCase() ?? 'png'
     const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-      : ext === 'gif' ? 'image/gif' : 'image/png'
-    const b64 = await imgFile.async('base64')
+               : ext === 'gif' ? 'image/gif' : 'image/png'
+    const b64  = await imgFile.async('base64')
     images.push({ key: crypto.randomUUID(), data_url: `data:${mime};base64,${b64}`, caption: '' })
   }
   return images
