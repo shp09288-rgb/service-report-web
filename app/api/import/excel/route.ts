@@ -16,20 +16,23 @@ async function resolveCardId(content: ParsedSheet['content']): Promise<{ id: str
   const model    = content.model.trim()
   const sid      = content.sid?.trim() ?? ''
 
-  // 1. Match by eq_id (most specific)
+  // Matching priority:
+  // 1. eq_id (most specific — hard stop: if eq_id present, never fall through to fuzzy match)
+  // 2. customer + model + sid (only when eq_id is absent)
+  // 3. customer + model        (only when eq_id and sid are both absent)
+  // If eq_id is present but no card matches, create a new card rather than
+  // risking attaching this document to a different piece of equipment.
+
   if (eq_id) {
     const { data } = await supabaseAdmin.from('cards').select('id').eq('eq_id', eq_id).maybeSingle()
     if (data) return { id: data.id, created: false }
-  }
-  // 2. Match by customer + model + sid (highly specific)
-  if (customer && model && sid) {
+    // eq_id present but unmatched → create new card; do NOT fall through
+  } else if (customer && model && sid) {
     const { data } = await supabaseAdmin.from('cards')
       .select('id').eq('customer', customer).eq('model', model).eq('sid', sid)
       .eq('type', 'field_service').maybeSingle()
     if (data) return { id: data.id, created: false }
-  }
-  // 3. Match by customer + model
-  if (customer && model) {
+  } else if (customer && model) {
     const { data } = await supabaseAdmin.from('cards')
       .select('id').eq('customer', customer).eq('model', model).eq('type', 'field_service')
       .maybeSingle()
@@ -47,8 +50,8 @@ async function resolveCardId(content: ParsedSheet['content']): Promise<{ id: str
     sid:       sid,
     eq_id:     eq_id,
     location:  content.location || '',
-    site:      customerVal,   // legacy NOT NULL — mirrors customer
-    equipment: modelVal,      // legacy NOT NULL — mirrors model
+    site:      customerVal,
+    equipment: modelVal,
   } as Omit<CardRow, 'id' | 'created_at' | 'updated_at'>).select('id').single()
 
   if (error || !newCard) throw new Error(`Failed to create card: ${error?.message}`)
