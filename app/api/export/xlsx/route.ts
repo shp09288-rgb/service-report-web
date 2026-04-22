@@ -68,25 +68,6 @@ function patchCell(xml: string, addr: string, value: string): string {
   return xml.replace('</sheetData>', `<row r="${excelRow}">${newCell}</row></sheetData>`)
 }
 
-function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
-  const cellXfsMatch = stylesXml.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
-  if (!cellXfsMatch) return stylesXml
-
-  const xfPattern = /<xf\b([\s\S]*?)(?:\/>|>[\s\S]*?<\/xf>)/g
-  let xfIndex = 0
-  const toModify = new Set(styleIndices)
-
-  const newCellXfs = cellXfsMatch[1].replace(xfPattern, (match) => {
-    const idx = xfIndex++
-    if (!toModify.has(idx) || match.includes('wrapText="1"')) return match
-    if (match.includes('<alignment')) return match.replace('<alignment', '<alignment wrapText="1"')
-    if (match.includes('/>')) return match.replace('/>', '><alignment wrapText="1"/></xf>')
-    return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
-  })
-
-  return stylesXml.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
-}
-
 function setRowHeight(xml: string, excelRow: number, ht: number): string {
   return xml.replace(
     new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*?)(?:\\s+customHeight="[^"]*")?(?:\\s+ht="[^"]*")?([^>]*>)`),
@@ -94,7 +75,7 @@ function setRowHeight(xml: string, excelRow: number, ht: number): string {
   )
 }
 
-// Remove all drawing/image references from sheet XML to prevent Excel repair errors
+// Strip all drawing/image references from sheet XML
 function stripDrawingRefs(xml: string): string {
   return xml
     .replace(/<drawing\b[^/]*\/>/g, '')
@@ -102,6 +83,9 @@ function stripDrawingRefs(xml: string): string {
     .replace(/<legacyDrawing\b[^/]*\/>/g, '')
     .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
 }
+
+// Empty rels file — replaces any template sheet rels that reference drawings
+const EMPTY_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
@@ -151,10 +135,14 @@ export async function POST(req: NextRequest) {
     if (target) sheetFile = target.startsWith('xl/') ? target : `xl/${target}`
   }
 
+  // Clear the template sheet's rels so drawing1.xml is no longer referenced
+  const sheetNum = sheetFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
+  zip.file(`xl/worksheets/_rels/sheet${sheetNum}.xml.rels`, EMPTY_RELS)
+
   let sheetXml = await zip.file(sheetFile)?.async('text')
   if (!sheetXml) return err('Template worksheet not found', 500)
 
-  // Strip all drawing/image refs — prevents repair dialog and misplaced images
+  // Strip drawing tags from sheet XML (belt-and-suspenders with cleared rels)
   sheetXml = stripDrawingRefs(sheetXml)
 
   const enc = ([col, row]: [number, number]) => XLSX.utils.encode_cell({ r: row, c: col })
@@ -187,18 +175,12 @@ export async function POST(req: NextRequest) {
     sheetXml = patchCell(sheetXml, addr, value)
   }
 
-  // Expand rows 16-21 (problem/target merged area) so long text is visible
+  // Expand rows 16-21 (problem/target merged area)
   for (let r = 16; r <= 21; r++) {
     sheetXml = setRowHeight(sheetXml, r, 40)
   }
 
   zip.file(sheetFile, sheetXml)
-
-  // Patch styles.xml — add wrapText to styles 68 (problem), 70 (target), 78 (daily_note)
-  const stylesXml = await zip.file('xl/styles.xml')?.async('text')
-  if (stylesXml) {
-    zip.file('xl/styles.xml', addWrapTextToStyles(stylesXml, [68, 70, 78]))
-  }
 
   // Rename sheet tab
   zip.file('xl/workbook.xml', wbXml.replace(

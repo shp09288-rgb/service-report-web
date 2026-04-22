@@ -62,26 +62,7 @@ function setRowHeight(xml: string, excelRow: number, ht: number): string {
   )
 }
 
-function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
-  const cellXfsMatch = stylesXml.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
-  if (!cellXfsMatch) return stylesXml
-
-  const xfPattern = /<xf\b([\s\S]*?)(?:\/>|>[\s\S]*?<\/xf>)/g
-  let xfIndex = 0
-  const toModify = new Set(styleIndices)
-
-  const newCellXfs = cellXfsMatch[1].replace(xfPattern, (match) => {
-    const idx = xfIndex++
-    if (!toModify.has(idx) || match.includes('wrapText="1"')) return match
-    if (match.includes('<alignment')) return match.replace('<alignment', '<alignment wrapText="1"')
-    if (match.includes('/>')) return match.replace('/>', '><alignment wrapText="1"/></xf>')
-    return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
-  })
-
-  return stylesXml.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
-}
-
-// Remove all drawing/image references from sheet XML to prevent Excel repair errors
+// Strip all drawing/image references from sheet XML
 function stripDrawingRefs(xml: string): string {
   return xml
     .replace(/<drawing\b[^/]*\/>/g, '')
@@ -89,6 +70,9 @@ function stripDrawingRefs(xml: string): string {
     .replace(/<legacyDrawing\b[^/]*\/>/g, '')
     .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
 }
+
+// Empty rels — replaces template sheet rels that reference drawings
+const EMPTY_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`
 
 function buildUpdates(content: FieldServiceContent, reportDate: string): [string, string][] {
   const enc = ([col, row]: [number, number]) => XLSX.utils.encode_cell({ r: row, c: col })
@@ -119,8 +103,8 @@ function buildUpdates(content: FieldServiceContent, reportDate: string): [string
 }
 
 // GET /api/cards/[id]/export/xlsx
-// Exports all internal field_service reports as a multi-sheet workbook.
-// Images/drawings are fully stripped to prevent Excel repair errors.
+// Multi-sheet workbook: all internal field_service reports, newest first.
+// All drawing/image references are stripped to prevent Excel repair errors.
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { id: cardId } = await params
 
@@ -132,7 +116,7 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { data: docs } = await supabaseAdmin
     .from('documents').select('*')
     .eq('card_id', cardId).eq('is_external', false)
-    .order('report_date', { ascending: false })  // newest first
+    .order('report_date', { ascending: false })
 
   if (!docs || docs.length === 0) return errRes('No internal reports found for this card', 404)
 
@@ -155,14 +139,12 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const tmplXml = await zip.file(tmplFile)?.async('text')
   if (!tmplXml) return errRes('Template worksheet not found in file', 500)
 
-  // Strip all drawing/image refs from template — no cloning, no repair errors
-  const tmplXmlClean = stripDrawingRefs(tmplXml)
+  // Clear template sheet rels so drawing1.xml is no longer referenced
+  const tmplSheetNum = tmplFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
+  zip.file(`xl/worksheets/_rels/sheet${tmplSheetNum}.xml.rels`, EMPTY_RELS)
 
-  // Patch styles.xml once for the whole workbook
-  const stylesXml = await zip.file('xl/styles.xml')?.async('text')
-  if (stylesXml) {
-    zip.file('xl/styles.xml', addWrapTextToStyles(stylesXml, [68, 70, 78]))
-  }
+  // Strip drawing tags from template XML
+  const tmplXmlClean = stripDrawingRefs(tmplXml)
 
   const contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
   const sheetEntries:  string[] = []
@@ -186,7 +168,8 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 
     zip.file(`xl/worksheets/sheet${n}.xml`, patchedXml)
 
-    // n>1 needs a content type entry; sheet1 already has one from the template
+    // No sheet rels written for any sheet — no drawing references at all
+
     if (n > 1) {
       ctAddEntries.push(
         `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
@@ -199,13 +182,11 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     )
   }
 
-  // Replace <sheets> block in workbook.xml
   zip.file('xl/workbook.xml', wbXml.replace(
     /<sheets>[\s\S]*?<\/sheets>/,
     `<sheets>${sheetEntries.join('')}</sheets>`,
   ))
 
-  // Replace worksheet rels in workbook.xml.rels
   zip.file('xl/_rels/workbook.xml.rels', wbRelsXml
     .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
     .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
