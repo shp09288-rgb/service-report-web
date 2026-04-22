@@ -22,7 +22,6 @@ function escapeXml(s: string): string {
 
 function patchCell(xml: string, addr: string, value: string): string {
   const escaped = escapeXml(value)
-  // xml:space="preserve" prevents Excel from stripping whitespace in long text
   const inner   = value ? `<is><t xml:space="preserve">${escaped}</t></is>` : ''
   const tAttr   = value ? ' t="inlineStr"' : ''
 
@@ -56,7 +55,6 @@ function patchCell(xml: string, addr: string, value: string): string {
   return xml.replace('</sheetData>', `<row r="${excelRow}">${newCell}</row></sheetData>`)
 }
 
-// Set a row's height in sheet XML
 function setRowHeight(xml: string, excelRow: number, ht: number): string {
   return xml.replace(
     new RegExp(`(<row\\b[^>]*\\br="${excelRow}"[^>]*?)(?:\\s+customHeight="[^"]*")?(?:\\s+ht="[^"]*")?([^>]*>)`),
@@ -64,65 +62,65 @@ function setRowHeight(xml: string, excelRow: number, ht: number): string {
   )
 }
 
-// Add wrapText="1" to specific style indices in styles.xml
 function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
-  const result = stylesXml
-  const cellXfsMatch = result.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
-  if (!cellXfsMatch) return result
+  const cellXfsMatch = stylesXml.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
+  if (!cellXfsMatch) return stylesXml
 
-  const cellXfsContent = cellXfsMatch[1]
   const xfPattern = /<xf\b([\s\S]*?)(?:\/>|>[\s\S]*?<\/xf>)/g
   let xfIndex = 0
   const toModify = new Set(styleIndices)
 
-  const newCellXfs = cellXfsContent.replace(xfPattern, (match) => {
+  const newCellXfs = cellXfsMatch[1].replace(xfPattern, (match) => {
     const idx = xfIndex++
-    if (!toModify.has(idx)) return match
-    if (match.includes('wrapText="1"')) return match
-
-    if (match.includes('<alignment')) {
-      return match.replace('<alignment', '<alignment wrapText="1"')
-    } else if (match.includes('/>')) {
-      return match.replace('/>', '><alignment wrapText="1"/></xf>')
-    } else {
-      return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
-    }
+    if (!toModify.has(idx) || match.includes('wrapText="1"')) return match
+    if (match.includes('<alignment')) return match.replace('<alignment', '<alignment wrapText="1"')
+    if (match.includes('/>')) return match.replace('/>', '><alignment wrapText="1"/></xf>')
+    return match.replace('</xf>', '<alignment wrapText="1"/></xf>')
   })
 
-  return result.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
+  return stylesXml.replace(/<cellXfs>([\s\S]*?)<\/cellXfs>/, `<cellXfs>${newCellXfs}</cellXfs>`)
+}
+
+// Remove all drawing/image references from sheet XML to prevent Excel repair errors
+function stripDrawingRefs(xml: string): string {
+  return xml
+    .replace(/<drawing\b[^/]*\/>/g, '')
+    .replace(/<drawing\b[^>]*>[\s\S]*?<\/drawing>/g, '')
+    .replace(/<legacyDrawing\b[^/]*\/>/g, '')
+    .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
 }
 
 function buildUpdates(content: FieldServiceContent, reportDate: string): [string, string][] {
   const enc = ([col, row]: [number, number]) => XLSX.utils.encode_cell({ r: row, c: col })
   return [
     [enc(MAP_A.report_date),   reportDate],
-    [enc(MAP_A.fse_name),      content.fse_name        ?? ''],
-    [enc(MAP_A.tool_status),   content.tool_status     ?? ''],
-    [enc(MAP_A.customer),      content.customer        ?? ''],
-    [enc(MAP_A.location),      content.location        ?? ''],
-    [enc(MAP_A.crm_case_id),   content.crm_case_id     ?? ''],
-    [enc(MAP_A.model),         content.model           ?? ''],
-    [enc(MAP_A.site_survey),   content.site_survey     ?? ''],
-    [enc(MAP_A.noise_level),   content.noise_level     ?? ''],
-    [enc(MAP_A.main_user),     content.main_user       ?? ''],
-    [enc(MAP_A.sid),           content.sid             ?? ''],
-    [enc(MAP_A.start_date),    content.start_date      ?? ''],
-    [enc(MAP_A.tel),           content.tel             ?? ''],
-    [enc(MAP_A.eq_id),         content.eq_id           ?? ''],
-    [enc(MAP_A.start_time),    content.start_time      ?? ''],
-    [enc(MAP_A.email),         content.email           ?? ''],
-    [enc(MAP_A.service_type),  content.service_type    ?? ''],
-    [enc(MAP_A.end_time),      content.end_time        ?? ''],
+    [enc(MAP_A.fse_name),      content.fse_name          ?? ''],
+    [enc(MAP_A.tool_status),   content.tool_status       ?? ''],
+    [enc(MAP_A.customer),      content.customer          ?? ''],
+    [enc(MAP_A.location),      content.location          ?? ''],
+    [enc(MAP_A.crm_case_id),   content.crm_case_id       ?? ''],
+    [enc(MAP_A.model),         content.model             ?? ''],
+    [enc(MAP_A.site_survey),   content.site_survey       ?? ''],
+    [enc(MAP_A.noise_level),   content.noise_level       ?? ''],
+    [enc(MAP_A.main_user),     content.main_user         ?? ''],
+    [enc(MAP_A.sid),           content.sid               ?? ''],
+    [enc(MAP_A.start_date),    content.start_date        ?? ''],
+    [enc(MAP_A.tel),           content.tel               ?? ''],
+    [enc(MAP_A.eq_id),         content.eq_id             ?? ''],
+    [enc(MAP_A.start_time),    content.start_time        ?? ''],
+    [enc(MAP_A.email),         content.email             ?? ''],
+    [enc(MAP_A.service_type),  content.service_type      ?? ''],
+    [enc(MAP_A.end_time),      content.end_time          ?? ''],
     [enc(MAP_A.problem),       content.problem_statement ?? ''],
     [enc(MAP_A.target),        content.target_statement  ?? ''],
     [enc(MAP_A.daily_note),    content.critical_items?.[0]?.note ?? content.daily_note ?? ''],
-    [enc(MAP_A.data_location), content.data_location   ?? ''],
+    [enc(MAP_A.data_location), content.data_location     ?? ''],
   ]
 }
 
 // GET /api/cards/[id]/export/xlsx
-// Exports all internal field_service reports as a multi-sheet workbook
-// using the Park Systems template (styles/logo/merges preserved via raw ZIP patching).
+// Exports all internal field_service reports as a multi-sheet workbook.
+// Images/drawings are fully stripped to prevent Excel repair errors.
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { id: cardId } = await params
 
@@ -145,7 +143,6 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 
   const zip = await JSZip.loadAsync(templateBuffer)
 
-  // Resolve template worksheet file via workbook relationships
   const wbXml     = await zip.file('xl/workbook.xml')?.async('text') ?? ''
   const wbRelsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
   const firstRId  = wbXml.match(/<sheet\b[^>]*\br:id="(rId\d+)"/)?.[1]
@@ -154,35 +151,20 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     const t = wbRelsXml.match(new RegExp(`Id="${firstRId}"[^>]*Target="([^"]+)"`))?.[1]
     if (t) tmplFile = t.startsWith('xl/') ? t : `xl/${t}`
   }
-  const tmplSheetNum = tmplFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
 
   const tmplXml = await zip.file(tmplFile)?.async('text')
   if (!tmplXml) return errRes('Template worksheet not found in file', 500)
 
-  // Patch styles.xml once — add wrapText to styles 68 (problem), 70 (target), 78 (daily_note)
+  // Strip all drawing/image refs from template — no cloning, no repair errors
+  const tmplXmlClean = stripDrawingRefs(tmplXml)
+
+  // Patch styles.xml once for the whole workbook
   const stylesXml = await zip.file('xl/styles.xml')?.async('text')
   if (stylesXml) {
     zip.file('xl/styles.xml', addWrapTextToStyles(stylesXml, [68, 70, 78]))
   }
 
-  // Check if template has drawing (logo image) — we clone it per sheet
-  const tmplSheetRels = await zip.file(`xl/worksheets/_rels/sheet${tmplSheetNum}.xml.rels`)?.async('text') ?? null
-  const drawingNumStr = tmplSheetRels?.match(/drawings\/drawing(\d+)\.xml/)?.[1] ?? null
-  const drawingXml    = drawingNumStr
-    ? await zip.file(`xl/drawings/drawing${drawingNumStr}.xml`)?.async('text') ?? null
-    : null
-  const drawingRels   = drawingNumStr
-    ? await zip.file(`xl/drawings/_rels/drawing${drawingNumStr}.xml.rels`)?.async('text') ?? null
-    : null
-
-  // Strip legacyDrawing (vmlDrawing/comments) from template sheet XML to avoid
-  // Excel "repair" errors when multiple sheets reference the same vml file.
-  const tmplXmlClean = tmplXml
-    .replace(/<legacyDrawing\b[^/]*\/>/g, '')
-    .replace(/<legacyDrawing\b[^>]*>[\s\S]*?<\/legacyDrawing>/g, '')
-
   const contentTypesXml = await zip.file('[Content_Types].xml')?.async('text') ?? ''
-
   const sheetEntries:  string[] = []
   const wsRelEntries:  string[] = []
   const ctAddEntries:  string[] = []
@@ -190,42 +172,22 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
   for (let i = 0; i < docs.length; i++) {
     const docRow  = docs[i] as DocumentRow
     const content = normalizeFieldServiceContent(docRow.content) as FieldServiceContent
-    const n       = i + 1                                          // 1-indexed sheet number
-    const wsId    = `wsId${n}`                                     // unique rels ID
-    const tabName = docRow.report_date.replace(/-/g, '.')          // YYYY.MM.DD
+    const n       = i + 1
+    const wsId    = `wsId${n}`
+    const tabName = docRow.report_date.replace(/-/g, '.')
 
-    // Patch template XML for this document's data
     let patchedXml = tmplXmlClean
     for (const [addr, value] of buildUpdates(content, docRow.report_date)) {
       patchedXml = patchCell(patchedXml, addr, value)
     }
-
-    // Expand rows 16-21 (problem/target merged area) for long text
     for (let r = 16; r <= 21; r++) {
       patchedXml = setRowHeight(patchedXml, r, 40)
     }
 
     zip.file(`xl/worksheets/sheet${n}.xml`, patchedXml)
 
-    // Clone drawing (logo) for each sheet — use drawing-only rels (no vmlDrawing)
-    if (drawingNumStr && drawingXml && drawingRels) {
-      zip.file(`xl/drawings/drawing${n}.xml`, drawingXml)
-      zip.file(`xl/drawings/_rels/drawing${n}.xml.rels`, drawingRels)
-
-      // Sheet rels: only the drawing relationship, no vmlDrawing or comments
-      const sheetRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${n}.xml"/>
-</Relationships>`
-      zip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, sheetRelsXml)
-
-      if (n > 1) {
-        ctAddEntries.push(
-          `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
-          `<Override PartName="/xl/drawings/drawing${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
-        )
-      }
-    } else if (n > 1) {
+    // n>1 needs a content type entry; sheet1 already has one from the template
+    if (n > 1) {
       ctAddEntries.push(
         `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
       )
@@ -237,19 +199,18 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     )
   }
 
-  // Update workbook.xml — replace entire <sheets> block
+  // Replace <sheets> block in workbook.xml
   zip.file('xl/workbook.xml', wbXml.replace(
     /<sheets>[\s\S]*?<\/sheets>/,
     `<sheets>${sheetEntries.join('')}</sheets>`,
   ))
 
-  // Update workbook.xml.rels — remove old worksheet rels, append new ones
+  // Replace worksheet rels in workbook.xml.rels
   zip.file('xl/_rels/workbook.xml.rels', wbRelsXml
     .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
     .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
   )
 
-  // Update [Content_Types].xml — insert new overrides for sheets 2+
   if (ctAddEntries.length > 0) {
     zip.file('[Content_Types].xml', contentTypesXml.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
   }
