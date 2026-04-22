@@ -66,7 +66,7 @@ function setRowHeight(xml: string, excelRow: number, ht: number): string {
 
 // Add wrapText="1" to specific style indices in styles.xml
 function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
-  let result = stylesXml
+  const result = stylesXml
   const cellXfsMatch = result.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
   if (!cellXfsMatch) return result
 

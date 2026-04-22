@@ -71,7 +71,7 @@ function patchCell(xml: string, addr: string, value: string): string {
 
 // Add wrapText="1" to a style index in styles.xml
 function addWrapTextToStyles(stylesXml: string, styleIndices: number[]): string {
-  let result = stylesXml
+  const result = stylesXml
   // Parse all <xf ...> elements in <cellXfs> section
   const cellXfsMatch = result.match(/<cellXfs>([\s\S]*?)<\/cellXfs>/)
   if (!cellXfsMatch) return result
