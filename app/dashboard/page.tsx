@@ -10,12 +10,14 @@ type TypeFilter = 'all' | CardType
 interface ActiveLock { card_id: string; user_name: string }
 
 const EMPTY_CARD_FORM = {
-  type:     'field_service' as CardType,
-  customer: '',
-  model:    '',
-  sid:      '',
-  eq_id:    '',
-  location: '',
+  type:        'field_service' as CardType,
+  customer:    '',
+  model:       '',
+  sid:         '',
+  eq_id:       '',
+  location:    '',
+  site_survey: '',
+  noise_level: '',
 }
 
 export default function DashboardPage() {
@@ -142,12 +144,14 @@ export default function DashboardPage() {
   function openEdit(card: CardRow) {
     setEditingCard(card)
     setEditForm({
-      type:     card.type,
-      customer: card.customer,
-      model:    card.model,
-      sid:      card.sid,
-      eq_id:    card.eq_id,
-      location: card.location,
+      type:        card.type,
+      customer:    card.customer,
+      model:       card.model,
+      sid:         card.sid,
+      eq_id:       card.eq_id,
+      location:    card.location,
+      site_survey: card.site_survey ?? '',
+      noise_level: card.noise_level ?? '',
     })
     setEditAdminPassword('')
     setEditError('')
@@ -471,11 +475,13 @@ export default function DashboardPage() {
               </div>
               {(
                 [
-                  { key: 'customer', label: 'Customer', placeholder: 'e.g. SDC A6' },
-                  { key: 'model',    label: 'Model',    placeholder: 'e.g. NX-TSH2326' },
-                  { key: 'sid',      label: 'SID',      placeholder: 'e.g. D25005-190423' },
-                  { key: 'eq_id',    label: 'EQ ID',    placeholder: 'e.g. EQ01' },
-                  { key: 'location', label: 'Location', placeholder: 'e.g. [ASAN] SDC A6 CR2F M16 기둥열 부근' },
+                  { key: 'customer',    label: 'Customer',    placeholder: 'e.g. SDC A6' },
+                  { key: 'model',       label: 'Model',       placeholder: 'e.g. NX-TSH2326' },
+                  { key: 'sid',         label: 'SID',         placeholder: 'e.g. D25005-190423' },
+                  { key: 'eq_id',       label: 'EQ ID',       placeholder: 'e.g. EQ01' },
+                  { key: 'location',    label: 'Location',    placeholder: 'e.g. [ASAN] SDC A6 CR2F M16 기둥열 부근' },
+                  { key: 'site_survey', label: 'Site Survey', placeholder: 'e.g. VC-C' },
+                  { key: 'noise_level', label: 'Noise Level', placeholder: 'e.g. 60~65dB' },
                 ] as { key: keyof typeof createForm; label: string; placeholder: string }[]
               ).map(({ key, label: lbl, placeholder }) => (
                 <div key={key}>
@@ -516,11 +522,13 @@ export default function DashboardPage() {
               </p>
               {(
                 [
-                  { key: 'customer', label: 'Customer' },
-                  { key: 'model',    label: 'Model' },
-                  { key: 'sid',      label: 'SID' },
-                  { key: 'eq_id',    label: 'EQ ID' },
-                  { key: 'location', label: 'Location' },
+                  { key: 'customer',    label: 'Customer' },
+                  { key: 'model',       label: 'Model' },
+                  { key: 'sid',         label: 'SID' },
+                  { key: 'eq_id',       label: 'EQ ID' },
+                  { key: 'location',    label: 'Location' },
+                  { key: 'site_survey', label: 'Site Survey' },
+                  { key: 'noise_level', label: 'Noise Level' },
                 ] as { key: keyof typeof editForm; label: string }[]
               ).map(({ key, label: lbl }) => (
                 <div key={key}>

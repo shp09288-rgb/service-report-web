@@ -38,10 +38,12 @@ export async function PATCH(
   const body = await req.json().catch(() => null)
   if (!body) return err('Invalid JSON', 400)
 
-  const { customer, model, sid, eq_id, location, password } =
+  const { customer, model, sid, eq_id, location, site_survey, noise_level, password } =
     body as {
       customer?: string; model?: string; sid?: string
-      eq_id?: string; location?: string; password?: string
+      eq_id?: string; location?: string
+      site_survey?: string; noise_level?: string
+      password?: string
     }
 
   if (!password) return err('Password required', 400)
@@ -56,15 +58,16 @@ export async function PATCH(
   const { data, error } = await supabaseAdmin
     .from('cards')
     .update({
-      customer:   customer.trim(),
-      model:      model.trim(),
-      sid:        (sid ?? '').trim(),
-      eq_id:      (eq_id ?? '').trim(),
-      location:   (location ?? '').trim(),
-      // Keep legacy columns in sync until cleanup migration
-      site:       customer.trim(),
-      equipment:  model.trim(),
-      updated_at: new Date().toISOString(),
+      customer:    customer.trim(),
+      model:       model.trim(),
+      sid:         (sid ?? '').trim(),
+      eq_id:       (eq_id ?? '').trim(),
+      location:    (location ?? '').trim(),
+      site_survey: (site_survey ?? '').trim(),
+      noise_level: (noise_level ?? '').trim(),
+      site:        customer.trim(),
+      equipment:   model.trim(),
+      updated_at:  new Date().toISOString(),
     })
     .eq('id', id)
     .select()

@@ -11,6 +11,8 @@ export interface CardRow extends Record<string, unknown> {
   sid: string
   eq_id: string
   location: string
+  site_survey: string
+  noise_level: string
   // Deprecated — kept for DB compatibility until 0003_drop_deprecated_columns.sql
   site: string
   equipment: string

@@ -20,13 +20,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   if (!body) return err('Invalid JSON', 400)
 
-  const { type, customer, model, sid, eq_id, location } = body as {
+  const { type, customer, model, sid, eq_id, location, site_survey, noise_level } = body as {
     type?: string
     customer?: string
     model?: string
     sid?: string
     eq_id?: string
     location?: string
+    site_survey?: string
+    noise_level?: string
   }
 
   if (!type || !customer?.trim() || !model?.trim()) {
@@ -37,16 +39,16 @@ export async function POST(req: NextRequest) {
   }
 
   const insert: CardInsert & { site: string; equipment: string } = {
-    type:      type as CardInsert['type'],
-    customer:  customer.trim(),
-    model:     model.trim(),
-    sid:       (sid ?? '').trim(),
-    eq_id:     (eq_id ?? '').trim(),
-    location:  (location ?? '').trim(),
-    // Compatibility: site/equipment are NOT NULL in the DB until the cleanup
-    // migration runs; mirror the canonical fields so the constraint is satisfied.
-    site:      customer.trim(),
-    equipment: model.trim(),
+    type:        type as CardInsert['type'],
+    customer:    customer.trim(),
+    model:       model.trim(),
+    sid:         (sid ?? '').trim(),
+    eq_id:       (eq_id ?? '').trim(),
+    location:    (location ?? '').trim(),
+    site_survey: (site_survey ?? '').trim(),
+    noise_level: (noise_level ?? '').trim(),
+    site:        customer.trim(),
+    equipment:   model.trim(),
   }
 
   const { data, error } = await supabaseAdmin

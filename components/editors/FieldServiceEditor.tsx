@@ -208,6 +208,7 @@ export function FieldServiceEditor({ content, onChange, readOnly = false, cardSe
             <td className={S.lc} style={{ width: 90 }}>CRM Case ID</td>
             <td className={S.vc} style={{ width: 160 }}>
               <input type="text" className={S.inp} value={content.crm_case_id}
+                placeholder="(고객명)"
                 onChange={e => set('crm_case_id', e.target.value)} disabled={readOnly} />
             </td>
           </tr>
