@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
       docRow.report_date,
       ganttTasks,
     )
-    filename = `${date}_${docType}_${customer}_${eqId}_installation.docx`
+    filename = `${date}_${customer}_Installation Report.docx`
 
   } else {
     return err('Unsupported card type', 400)

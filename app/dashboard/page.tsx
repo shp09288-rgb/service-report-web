@@ -105,8 +105,8 @@ export default function DashboardPage() {
 
   // ── Create card ──────────────────────────────────────────────
 
-  function openCreate() {
-    setCreateForm(EMPTY_CARD_FORM)
+  function openCreate(type: CardType = 'field_service') {
+    setCreateForm({ ...EMPTY_CARD_FORM, type })
     setCreateError('')
     setShowCreateModal(true)
   }
@@ -369,8 +369,11 @@ export default function DashboardPage() {
                 ? `Export Selected (${selectedCards.length})`
                 : 'Backup Export'}
           </button>
-          <button onClick={openCreate} className={btnPri}>
-            + New Card
+          <button onClick={() => openCreate('field_service')} className={btnSec}>
+            + New Field Service
+          </button>
+          <button onClick={() => openCreate('installation')} className={btnPri}>
+            + New Installation
           </button>
         </div>
       </div>
@@ -429,8 +432,11 @@ export default function DashboardPage() {
             {cards.length === 0 ? (
               <div className="space-y-4">
                 <p>No cards yet.</p>
-                <button onClick={openCreate} className={btnPri}>
-                  + New Card
+                <button onClick={() => openCreate('field_service')} className={btnSec}>
+                  + New Field Service
+                </button>
+                <button onClick={() => openCreate('installation')} className={btnPri}>
+                  + New Installation
                 </button>
               </div>
             ) : (
