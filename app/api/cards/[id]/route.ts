@@ -55,23 +55,27 @@ export async function PATCH(
     return err('customer and model are required', 400)
   }
 
-  const { data, error } = await supabaseAdmin
-    .from('cards')
-    .update({
-      customer:    customer.trim(),
-      model:       model.trim(),
-      sid:         (sid ?? '').trim(),
-      eq_id:       (eq_id ?? '').trim(),
-      location:    (location ?? '').trim(),
-      site_survey: (site_survey ?? '').trim(),
-      noise_level: (noise_level ?? '').trim(),
-      site:        customer.trim(),
-      equipment:   model.trim(),
-      updated_at:  new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single()
+  const updatePayload = {
+    customer:    customer.trim(),
+    model:       model.trim(),
+    sid:         (sid ?? '').trim(),
+    eq_id:       (eq_id ?? '').trim(),
+    location:    (location ?? '').trim(),
+    site_survey: (site_survey ?? '').trim(),
+    noise_level: (noise_level ?? '').trim(),
+    site:        customer.trim(),
+    equipment:   model.trim(),
+    updated_at:  new Date().toISOString(),
+  }
+
+  let { data, error } = await supabaseAdmin
+    .from('cards').update(updatePayload).eq('id', id).select().single()
+
+  // PGRST204: migration 0004 not yet applied — retry without new columns
+  if (error?.code === 'PGRST204') {
+    const { site_survey: _ss, noise_level: _nl, ...basePayload } = updatePayload
+    ;({ data, error } = await supabaseAdmin.from('cards').update(basePayload).eq('id', id).select().single())
+  }
 
   if (error) {
     if (error.code === 'PGRST116') return err('Card not found', 404)

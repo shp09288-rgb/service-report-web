@@ -51,11 +51,18 @@ export async function POST(req: NextRequest) {
     equipment:   model.trim(),
   }
 
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from('cards')
     .insert(insert)
     .select()
     .single()
+
+  // PGRST204: column not in schema cache — migration 0004 not yet applied.
+  // Fall back to insert without those two columns so card creation still works.
+  if (error?.code === 'PGRST204') {
+    const { site_survey: _ss, noise_level: _nl, ...insertBase } = insert
+    ;({ data, error } = await supabaseAdmin.from('cards').insert(insertBase).select().single())
+  }
 
   if (error) return err(error.message, 500)
   return NextResponse.json(data, { status: 201 })
