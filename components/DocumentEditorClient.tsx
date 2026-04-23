@@ -150,12 +150,14 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         setExportError(body.error ?? 'Export failed.')
         return
       }
-      const blob   = await res.blob()
-      const url    = URL.createObjectURL(blob)
-      const prefix = card.type === 'installation' ? 'installation' : 'field-service'
-      const a      = document.createElement('a')
-      a.href       = url
-      a.download   = `${prefix}-${doc.report_date}.docx`
+      const disposition = res.headers.get('Content-Disposition') ?? ''
+      const match       = disposition.match(/filename="([^"]+)"/)
+      const filename    = match ? match[1] : `export-${doc.report_date}.docx`
+      const blob        = await res.blob()
+      const url         = URL.createObjectURL(blob)
+      const a           = document.createElement('a')
+      a.href            = url
+      a.download        = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
