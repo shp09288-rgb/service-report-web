@@ -9,7 +9,7 @@ import { useLock } from '@/hooks/useLock'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
 import type { CardRow, DocumentRow } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
-import { normalizeFieldServiceContent } from '@/lib/content-defaults'
+import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
 
 type Content = FieldServiceContent | InstallationContent
 
@@ -122,7 +122,7 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         setContent(
           cardData.type === 'field_service'
             ? normalizeFieldServiceContent(docData.content) as Content
-            : docData.content as Content
+            : normalizeInstallationContent(docData.content) as Content
         )
       })
       .catch(() => setLoadError('Network error. Check your Supabase connection.'))

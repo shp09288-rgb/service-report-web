@@ -242,24 +242,110 @@ export function normalizeFieldServiceContent(raw: unknown): FieldServiceContent 
 export const defaultInstallationContent = (card?: CardRow): InstallationContent => {
   const meta = card ? metaFromCard(card) : { customer: '', model: '', sid: '', eq_id: '', location: '' }
   return {
-    is_card_seeded: card != null,
-    fse_name: '',
-    report_date: '',
-    customer: meta.customer,
-    location: meta.location,
-    crm_case_id: '',
-    model: meta.model,
-    site_survey: '',
-    noise_level: '',
-    main_user: '',
-    sid: meta.sid,
-    tel: '',
-    eq_id: meta.eq_id,
-    email: '',
-    est_complete_date: '',
-    total_cycle_time: '',
-    action_chart: [{ item: '', committed: '', actual_pct: 0 }],
-    critical_items: [{ title: '', detail: '', next_plan: '' }],
-    images: [],
+    is_card_seeded:        card != null,
+    fse_name:              '',
+    report_date:           '',
+    customer:              meta.customer,
+    model:                 meta.model,
+    sid:                   meta.sid,
+    eq_id:                 meta.eq_id,
+    location:              meta.location,
+    site_survey:           '',
+    noise_level:           '',
+    start_date:            '',
+    est_complete_date:     '',
+    crm_case_id:           '',
+    main_user:             '',
+    tel:                   '',
+    email:                 '',
+    committed_pct:         0,
+    actual_pct:            0,
+    total_days:            0,
+    progress_days:         0,
+    action_chart:          [{ item: '', committed: '', actual_pct: 0 }],
+    critical_item_summary: '',
+    detail_report:         [{ title: '', content: '' }],
+    next_plan:             '',
+    data_location:         '',
+  }
+}
+
+// Normalizer — migrates old InstallationContent shapes to the current schema
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normalizeInstallationContent(raw: any): InstallationContent {
+  if (!raw || typeof raw !== 'object') return defaultInstallationContent()
+
+  const r = raw as Record<string, unknown>
+  const str  = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback)
+  const num  = (v: unknown, fallback = 0)  => (typeof v === 'number' ? v : fallback)
+  const bool = (v: unknown) => v === true
+
+  // Migrate old action_chart
+  const oldChart = Array.isArray(r.action_chart) ? r.action_chart : []
+  const action_chart = oldChart.map((row: Record<string, unknown>) => ({
+    item:       str(row.item),
+    committed:  str(row.committed),
+    actual_pct: num(row.actual_pct),
+  }))
+  if (action_chart.length === 0) action_chart.push({ item: '', committed: '', actual_pct: 0 })
+
+  // Migrate old critical_items → critical_item_summary
+  let critical_item_summary = str(r.critical_item_summary)
+  if (!critical_item_summary && Array.isArray(r.critical_items)) {
+    const items = r.critical_items as Record<string, unknown>[]
+    critical_item_summary = items
+      .map((it, i) => `${i + 1}. ${str(it.title)}`)
+      .filter(s => s.trim().length > 2)
+      .join('\n')
+  }
+
+  // Migrate old critical_items → detail_report
+  let detail_report: { title: string; content: string }[] = []
+  if (Array.isArray(r.detail_report)) {
+    detail_report = (r.detail_report as Record<string, unknown>[]).map(it => ({
+      title:   str(it.title),
+      content: str(it.content),
+    }))
+  } else if (Array.isArray(r.critical_items)) {
+    detail_report = (r.critical_items as Record<string, unknown>[]).map(it => ({
+      title:   str(it.title),
+      content: [str(it.detail), str(it.next_plan)].filter(Boolean).join('\n'),
+    }))
+  }
+  if (detail_report.length === 0) detail_report.push({ title: '', content: '' })
+
+  // Migrate total_cycle_time (old string) → total_days
+  let total_days = num(r.total_days)
+  if (!total_days && typeof r.total_cycle_time === 'string') {
+    const m = r.total_cycle_time.match(/\d+/)
+    if (m) total_days = parseInt(m[0], 10)
+  }
+
+  return {
+    is_card_seeded:        bool(r.is_card_seeded),
+    fse_name:              str(r.fse_name),
+    report_date:           str(r.report_date),
+    customer:              str(r.customer),
+    model:                 str(r.model),
+    sid:                   str(r.sid),
+    eq_id:                 str(r.eq_id),
+    location:              str(r.location),
+    site_survey:           str(r.site_survey),
+    noise_level:           str(r.noise_level),
+    start_date:            str(r.start_date),
+    est_complete_date:     str(r.est_complete_date),
+    crm_case_id:           str(r.crm_case_id),
+    main_user:             str(r.main_user),
+    tel:                   str(r.tel),
+    email:                 str(r.email),
+    committed_pct:         Math.min(100, Math.max(0, num(r.committed_pct))),
+    actual_pct:            Math.min(100, Math.max(0, num(r.actual_pct))),
+    total_days,
+    progress_days:         num(r.progress_days),
+    action_chart,
+    critical_item_summary,
+    detail_report,
+    next_plan:             str(r.next_plan),
+    data_location:         str(r.data_location),
   }
 }

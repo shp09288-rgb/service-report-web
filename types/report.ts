@@ -63,22 +63,48 @@ export interface FieldServiceContent {
 
 export interface InstallationContent {
   is_card_seeded?: boolean
+
+  // Header
   fse_name: string
   report_date: string
+
+  // System Information
   customer: string
-  location: string
-  crm_case_id: string
   model: string
+  sid: string
+  eq_id: string
+
+  // Installation Information
+  location: string
   site_survey: string
   noise_level: string
-  main_user: string
-  sid: string
-  tel: string
-  eq_id: string
-  email: string
+  start_date: string
   est_complete_date: string
-  total_cycle_time: string
+
+  // Contact Info
+  crm_case_id: string
+  main_user: string
+  tel: string
+  email: string
+
+  // Total Cycle Time
+  committed_pct: number   // 0–100
+  actual_pct: number      // 0–100
+  total_days: number
+  progress_days: number
+
+  // Individual Action Chart
   action_chart: { item: string; committed: string; actual_pct: number }[]
-  critical_items: { title: string; detail: string; next_plan: string }[]
-  images: ImageRef[]
+
+  // Critical Item Summary (single text block)
+  critical_item_summary: string
+
+  // Detail Report (numbered items)
+  detail_report: { title: string; content: string }[]
+
+  // Next Plan (single text block)
+  next_plan: string
+
+  // Data Location
+  data_location: string
 }
