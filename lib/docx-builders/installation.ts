@@ -12,6 +12,7 @@ import {
 } from 'docx'
 import type { InstallationContent } from '@/types/report'
 import type { GanttTask } from '@/types/db'
+import { GANTT_CATEGORIES, getProgress } from '@/lib/gantt-progress'
 
 // ── Borders ───────────────────────────────────────────────────
 const THIN  = { style: BorderStyle.SINGLE, size: 4,  color: 'AAAAAA' }
@@ -230,6 +231,61 @@ export function buildInstallationSections(
   out.push(infoTable)
   out.push(spacer())
 
+  // ── 2b. Total Progress summary ────────────────────────────
+  if (ganttTasks.length > 0) {
+    const progress = getProgress(ganttTasks)
+    const totalPct = Math.round(progress.totalPct * 100)
+
+    const progressRows: TableRow[] = [
+      // Total row
+      new TableRow({ children: [
+        labelCell('TOTAL', 1, 14),
+        progressBarCell(totalPct, BAR_BLUE, 1),
+        new TableCell({
+          width: pct(12), borders: allB, verticalAlign: VerticalAlign.CENTER,
+          children: [para([run(`${progress.completed}/${progress.total}`, { bold: true, size: 16 })])],
+        }),
+        new TableCell({
+          width: pct(10), borders: allB, verticalAlign: VerticalAlign.CENTER,
+          children: [para([run(`${totalPct}%`, { size: 16 })])],
+        }),
+      ]}),
+      // Per-category rows
+      ...GANTT_CATEGORIES.map(cat => {
+        const cp = progress.categories[cat]
+        const pct2 = Math.round((cp?.pct ?? 0) * 100)
+        return new TableRow({ children: [
+          labelCell(cat, 1, 14),
+          progressBarCell(pct2, BAR_GREEN, 1),
+          new TableCell({
+            width: pct(12), borders: allB, verticalAlign: VerticalAlign.CENTER,
+            children: [para([run(`${cp?.completed ?? 0}/${cp?.total ?? 0}`, { size: 16 })])],
+          }),
+          new TableCell({
+            width: pct(10), borders: allB, verticalAlign: VerticalAlign.CENTER,
+            children: [para([run(`${pct2}%`, { size: 16 })])],
+          }),
+        ]})
+      }),
+    ]
+
+    out.push(new Table({
+      width: pct(100),
+      borders: outerB,
+      rows: [
+        new TableRow({ children: [sectionHeaderCell('Total Progress', 4)] }),
+        new TableRow({ children: [
+          thCell('Category', 1),
+          thCell('Progress Bar', 1),
+          thCell('Completed', 1),
+          thCell('Pct', 1),
+        ]}),
+        ...progressRows,
+      ],
+    }))
+    out.push(spacer())
+  }
+
   // ── 3. Total Cycle Time (left) + Individual Action Chart (right) ──
   const chart = content.action_chart ?? []
   const committedPct = Math.min(100, Math.max(0, content.committed_pct ?? 0))
@@ -419,31 +475,55 @@ export function buildInstallationSections(
   }))
 
   // ── 7. Gantt Task Schedule (if tasks exist) ───────────────
+  // Two rows per task: Plan row + Action row
   if (ganttTasks.length > 0) {
     out.push(spacer())
+
+    const taskRows: TableRow[] = []
+    for (const task of ganttTasks) {
+      // Plan row
+      taskRows.push(new TableRow({
+        children: [
+          tdCell(String(task.no ?? '')),
+          tdCell(task.action ?? ''),
+          tdCell(task.category ?? ''),
+          tdCell(task.item ?? ''),
+          tdCell(task.remark ?? ''),
+          tdCell(task.status ?? ''),
+          tdCell(task.plan_duration != null ? String(task.plan_duration) : ''),
+          tdCell('Plan'),
+          tdCell(task.plan_start_date ?? ''),
+          tdCell(task.plan_complete_date ?? ''),
+        ],
+      }))
+      // Action row (actual)
+      taskRows.push(new TableRow({
+        children: [
+          tdCell(''),
+          tdCell(''),
+          tdCell(''),
+          tdCell(''),
+          tdCell(''),
+          tdCell(''),
+          tdCell(task.duration != null ? String(task.duration) : ''),
+          tdCell('Action'),
+          tdCell(task.start_date ?? ''),
+          tdCell(task.complete_date ?? ''),
+        ],
+      }))
+    }
+
     out.push(new Table({
       width: pct(100),
       borders: outerB,
       rows: [
-        new TableRow({ children: [sectionHeaderCell('Gantt — Task Schedule', 9)] }),
+        new TableRow({ children: [sectionHeaderCell('Gantt — Task Schedule', 10)] }),
         new TableRow({ children: [
           thCell('No'), thCell('Action'), thCell('Category'), thCell('Item'),
           thCell('Remark'), thCell('Status'), thCell('Days'),
-          thCell('Start'), thCell('Complete'),
+          thCell('Plan/Action'), thCell('Start'), thCell('Complete'),
         ]}),
-        ...ganttTasks.map(task => new TableRow({
-          children: [
-            tdCell(String(task.no ?? '')),
-            tdCell(task.action ?? ''),
-            tdCell(task.category ?? ''),
-            tdCell(task.item ?? ''),
-            tdCell(task.remark ?? ''),
-            tdCell(task.status ?? ''),
-            tdCell(task.duration != null ? String(task.duration) : ''),
-            tdCell(task.start_date ?? ''),
-            tdCell(task.complete_date ?? ''),
-          ],
-        })),
+        ...taskRows,
       ],
     }))
   }

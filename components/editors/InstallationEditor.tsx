@@ -145,17 +145,31 @@ export function InstallationEditor({ content, onChange, readOnly = false, cardSe
         </div>
 
         {/* Row 4: EQ ID | Est. Complete Date | E-mail */}
-        <div className="flex border-t border-b border-gray-300">
+        <div className="flex border-t border-gray-300">
           <div className={lbl} style={{ minWidth: 90 }}>EQ ID</div>
           <div className="flex-1 p-1"><input type="text" className={inp} value={content.eq_id} onChange={e => set('eq_id', e.target.value)} disabled={metaRO} /></div>
         </div>
-        <div className="flex border-t border-b border-l border-gray-300">
+        <div className="flex border-t border-l border-gray-300">
           <div className={lbl} style={{ minWidth: 100 }}>Est. Complete Date</div>
           <div className="flex-1 p-1"><input type="date" className={inp} value={content.est_complete_date} onChange={e => set('est_complete_date', e.target.value)} disabled={readOnly} /></div>
         </div>
-        <div className="flex border-t border-b border-l border-gray-300">
+        <div className="flex border-t border-l border-gray-300">
           <div className={lbl} style={{ minWidth: 100 }}>Main User E-mail</div>
           <div className="flex-1 p-1"><input type="email" className={inp} value={content.email} onChange={e => set('email', e.target.value)} disabled={readOnly} /></div>
+        </div>
+
+        {/* Row 5: Service Type | Start Time | End Time */}
+        <div className="flex border-t border-b border-gray-300">
+          <div className={lbl} style={{ minWidth: 90 }}>Service Type</div>
+          <div className="flex-1 p-1"><input type="text" className={inp} value={content.service_type ?? ''} onChange={e => set('service_type', e.target.value)} disabled={readOnly} /></div>
+        </div>
+        <div className="flex border-t border-b border-l border-gray-300">
+          <div className={lbl} style={{ minWidth: 100 }}>Start Time</div>
+          <div className="flex-1 p-1"><input type="time" className={inp} value={content.start_time ?? ''} onChange={e => set('start_time', e.target.value)} disabled={readOnly} /></div>
+        </div>
+        <div className="flex border-t border-b border-l border-gray-300">
+          <div className={lbl} style={{ minWidth: 100 }}>End Time</div>
+          <div className="flex-1 p-1"><input type="text" className={inp} value={content.end_time ?? ''} onChange={e => set('end_time', e.target.value)} disabled={readOnly} /></div>
         </div>
       </div>
 

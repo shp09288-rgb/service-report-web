@@ -5,10 +5,11 @@ import * as XLSX from 'xlsx'
 import * as fs from 'fs'
 import * as path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
-import { normalizeFieldServiceContent } from '@/lib/content-defaults'
+import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
 import { MAP_A } from '@/lib/excel-parser'
-import type { CardRow, DocumentRow } from '@/types/db'
-import type { FieldServiceContent } from '@/types/report'
+import { getProgress, GANTT_CATEGORIES } from '@/lib/gantt-progress'
+import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
+import type { FieldServiceContent, InstallationContent } from '@/types/report'
 
 type Params = Promise<{ id: string }>
 
@@ -96,16 +97,342 @@ function stripDrawingTags(xml: string): string {
     .replace(/<legacyDrawing\s[^>]*\/>/g, '')
 }
 
+// ── Installation template cell map ───────────────────────────
+// Row/col are 1-based for ExcelJS
+const INST_MAP = {
+  fse_name:         'V3',
+  report_date:      'V4',
+  customer:         'C7',
+  model:            'C8',
+  sid:              'C9',
+  eq_id:            'C10',
+  location:         'L7',
+  site_survey:      'L8',
+  noise_level:      'O8',
+  start_date:       'L9',
+  est_complete_date:'L10',
+  crm_case_id:      'T7',
+  main_user:        'T8',
+  tel:              'T9',
+  email:            'T10',
+  committed_pct:    'D15',
+  total_days:       'P15',
+  actual_pct:       'D16',
+  progress_days:    'P16',
+  critical_item_summary: 'B18',
+  // detail_report rows: B28, B29, B30, ...
+  next_plan:        'O28',
+  data_location:    'C33',
+  service_type:     'C11',
+  start_time:       'L11',
+  end_time:         'T11',
+}
+
+async function generateInstallationSheetBuffer(
+  templatePath: string,
+  content: InstallationContent,
+  tabName: string,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  await wb.xlsx.readFile(templatePath)
+  const ws = wb.worksheets[0]
+  ws.name = tabName
+
+  const set = (addr: string, value: string | number) => {
+    ws.getCell(addr).value = value
+  }
+
+  set(INST_MAP.fse_name,          content.fse_name          ?? '')
+  set(INST_MAP.report_date,       content.report_date       ?? '')
+  set(INST_MAP.customer,          content.customer          ?? '')
+  set(INST_MAP.model,             content.model             ?? '')
+  set(INST_MAP.sid,               content.sid               ?? '')
+  set(INST_MAP.eq_id,             content.eq_id             ?? '')
+  set(INST_MAP.location,          content.location          ?? '')
+  set(INST_MAP.site_survey,       content.site_survey       ?? '')
+  set(INST_MAP.noise_level,       content.noise_level       ?? '')
+  set(INST_MAP.start_date,        content.start_date        ?? '')
+  set(INST_MAP.est_complete_date, content.est_complete_date ?? '')
+  set(INST_MAP.crm_case_id,       content.crm_case_id       ?? '')
+  set(INST_MAP.main_user,         content.main_user         ?? '')
+  set(INST_MAP.tel,               content.tel               ?? '')
+  set(INST_MAP.email,             content.email             ?? '')
+  set(INST_MAP.critical_item_summary, content.critical_item_summary ?? '')
+  set(INST_MAP.next_plan,         content.next_plan         ?? '')
+  set(INST_MAP.data_location,     content.data_location     ?? '')
+  set(INST_MAP.service_type,      content.service_type      ?? '')
+  set(INST_MAP.start_time,        content.start_time        ?? '')
+  set(INST_MAP.end_time,          content.end_time          ?? '')
+
+  // Pct as 0-1 decimal
+  set(INST_MAP.committed_pct, (content.committed_pct ?? 0) / 100)
+  set(INST_MAP.actual_pct,    (content.actual_pct    ?? 0) / 100)
+  set(INST_MAP.total_days,    content.total_days    ?? 0)
+  set(INST_MAP.progress_days, content.progress_days ?? 0)
+
+  // Detail report rows: B28, B29, ...
+  const details = content.detail_report ?? []
+  details.forEach((item, idx) => {
+    const addr = `B${28 + idx}`
+    const text = item.title ? `${item.title}\n${item.content}` : item.content
+    ws.getCell(addr).value = text ?? ''
+  })
+
+  return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
+}
+
+// Build Gantt Chart sheet as ExcelJS workbook buffer (no template)
+async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  const ws = wb.addWorksheet(tabName)
+
+  const DARK_GRAY = '374151'
+  const WHITE     = 'FFFFFF'
+  const GREEN_BG  = 'D1FAE5'
+  const BLUE_BG   = 'DBEAFE'
+  const LIGHT_ALT = 'F9FAFB'
+
+  const headerFont = { bold: true, color: { argb: `FF${WHITE}` } }
+  const darkFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${DARK_GRAY}` } }
+
+  // Row 1: Title
+  ws.mergeCells('A1:L1')
+  const titleCell = ws.getCell('A1')
+  titleCell.value = 'Gantt Chart'
+  titleCell.font = { bold: true, size: 16, color: { argb: `FF${WHITE}` } }
+  titleCell.fill = darkFill
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+  ws.getRow(1).height = 28
+
+  // Row 2: empty
+  ws.getRow(2).height = 6
+
+  // Rows 3-7: Progress summary
+  const progress = getProgress(tasks)
+  const summaryData = [
+    ['Category', 'Progress'],
+    ['TOTAL', `${progress.completed}/${progress.total} (${Math.round(progress.totalPct * 100)}%)`],
+    ...GANTT_CATEGORIES.map(cat => {
+      const cp = progress.categories[cat]
+      return [cat, `${cp?.completed ?? 0}/${cp?.total ?? 0} (${Math.round((cp?.pct ?? 0) * 100)}%)`]
+    }),
+  ]
+
+  summaryData.forEach((row, ri) => {
+    const excelRow = ws.getRow(3 + ri)
+    excelRow.getCell(1).value = row[0]
+    excelRow.getCell(2).value = row[1]
+    if (ri === 0) {
+      excelRow.getCell(1).font = headerFont
+      excelRow.getCell(1).fill = darkFill
+      excelRow.getCell(2).font = headerFont
+      excelRow.getCell(2).fill = darkFill
+    } else if (ri % 2 === 0) {
+      const altFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${LIGHT_ALT}` } }
+      excelRow.getCell(1).fill = altFill
+      excelRow.getCell(2).fill = altFill
+    }
+    excelRow.getCell(1).border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+    excelRow.getCell(2).border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+  })
+
+  // Row 8: empty
+  ws.getRow(8 + summaryData.length).height = 6
+
+  // Header row for task table
+  const headerRow = 3 + summaryData.length + 1
+  const headers = ['No', 'Action', 'Category', 'Item', 'Remark', 'Status', 'Plan Days', 'Plan Start', 'Plan End', 'Actual Days', 'Actual Start', 'Actual End']
+  const hRow = ws.getRow(headerRow)
+  headers.forEach((h, ci) => {
+    const cell = hRow.getCell(ci + 1)
+    cell.value = h
+    cell.font = headerFont
+    cell.fill = darkFill
+    cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+  })
+  hRow.height = 20
+
+  // Task rows
+  tasks.forEach((task, ti) => {
+    const rowIdx = headerRow + 1 + ti
+    const row = ws.getRow(rowIdx)
+
+    const statusBg = task.status === 'Completed' ? GREEN_BG
+                   : task.status === 'Started'   ? BLUE_BG
+                   : null
+
+    const vals = [
+      task.no,
+      task.action ?? '',
+      task.category ?? '',
+      task.item ?? '',
+      task.remark ?? '',
+      task.status ?? '',
+      task.plan_duration ?? '',
+      task.plan_start_date ?? '',
+      task.plan_complete_date ?? '',
+      task.duration ?? '',
+      task.start_date ?? '',
+      task.complete_date ?? '',
+    ]
+
+    vals.forEach((v, ci) => {
+      const cell = row.getCell(ci + 1)
+      cell.value = v
+      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+      if (statusBg) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${statusBg}` } }
+      }
+    })
+  })
+
+  // Column widths
+  ws.columns = [
+    { width: 6 },  // No
+    { width: 20 }, // Action
+    { width: 20 }, // Category
+    { width: 30 }, // Item
+    { width: 16 }, // Remark
+    { width: 12 }, // Status
+    { width: 10 }, // Plan Days
+    { width: 14 }, // Plan Start
+    { width: 14 }, // Plan End
+    { width: 12 }, // Actual Days
+    { width: 14 }, // Actual Start
+    { width: 14 }, // Actual End
+  ]
+
+  return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
+}
+
+// ── Multi-sheet combiner (JSZip structural merge) ─────────────
+async function combineSheets(
+  sheetBufs: Buffer[],
+  tabNames: string[],
+): Promise<Buffer> {
+  const baseZip    = await JSZip.loadAsync(sheetBufs[0])
+  const baseWbXml  = await baseZip.file('xl/workbook.xml')?.async('text') ?? ''
+  const baseWbRels = await baseZip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
+  const baseCT     = await baseZip.file('[Content_Types].xml')?.async('text') ?? ''
+
+  const firstRId     = baseWbXml.match(/<sheet\b[^>]*\br:id="(rId\d+)"/)?.[1]
+  let   baseSheetFile = 'xl/worksheets/sheet1.xml'
+  if (firstRId) {
+    const t = baseWbRels.match(new RegExp(`Id="${firstRId}"[^>]*Target="([^"]+)"`))?.[1]
+    if (t) baseSheetFile = t.startsWith('xl/') ? t : `xl/${t}`
+  }
+
+  const sheetEntries: string[] = []
+  const wsRelEntries: string[] = []
+  const ctAddEntries: string[] = []
+
+  for (let i = 0; i < sheetBufs.length; i++) {
+    const n       = i + 1
+    const wsId    = `wsId${n}`
+    const tabName = tabNames[i]
+
+    if (i === 0) {
+      if (baseSheetFile !== 'xl/worksheets/sheet1.xml') {
+        const origData = await baseZip.file(baseSheetFile)?.async('uint8array')
+        if (origData) {
+          baseZip.file('xl/worksheets/sheet1.xml', origData)
+          baseZip.remove(baseSheetFile)
+        }
+        const baseSheetNum = baseSheetFile.match(/sheet(\d+)\.xml$/)?.[1] ?? '1'
+        const origRels = await baseZip.file(`xl/worksheets/_rels/sheet${baseSheetNum}.xml.rels`)?.async('uint8array')
+        if (origRels) {
+          baseZip.file('xl/worksheets/_rels/sheet1.xml.rels', origRels)
+          baseZip.remove(`xl/worksheets/_rels/sheet${baseSheetNum}.xml.rels`)
+        }
+      }
+    } else {
+      const sheetZip = await JSZip.loadAsync(sheetBufs[i])
+      const rawXml   = await sheetZip.file('xl/worksheets/sheet1.xml')?.async('text')
+      if (rawXml) {
+        baseZip.file(`xl/worksheets/sheet${n}.xml`, stripDrawingTags(rawXml))
+      }
+      ctAddEntries.push(
+        `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+      )
+    }
+
+    sheetEntries.push(`<sheet name="${escapeXml(tabName)}" sheetId="${n}" r:id="${wsId}"/>`)
+    wsRelEntries.push(
+      `<Relationship Id="${wsId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${n}.xml"/>`,
+    )
+  }
+
+  baseZip.file('xl/workbook.xml', baseWbXml.replace(
+    /<sheets>[\s\S]*?<\/sheets>/,
+    `<sheets>${sheetEntries.join('')}</sheets>`,
+  ))
+
+  baseZip.file('xl/_rels/workbook.xml.rels', baseWbRels
+    .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
+    .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
+  )
+
+  if (ctAddEntries.length > 0) {
+    baseZip.file('[Content_Types].xml', baseCT.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
+  }
+
+  return baseZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
+}
+
 // GET /api/cards/[id]/export/xlsx
-// Multi-sheet workbook: all internal field_service reports, newest first.
-// Each sheet is generated cleanly via ExcelJS; JSZip is used only for structural combination.
 export async function GET(_req: NextRequest, { params }: { params: Params }) {
   const { id: cardId } = await params
 
   const { data: card } = await supabaseAdmin.from('cards').select('*').eq('id', cardId).single()
   if (!card) return errRes('Card not found', 404)
   const cardRow = card as CardRow
-  if (cardRow.type !== 'field_service') return errRes('Excel export is only supported for field_service cards')
+
+  // ── Installation export ────────────────────────────────────
+  if (cardRow.type === 'installation') {
+    // Fetch gantt data
+    const { data: ganttRow } = await supabaseAdmin
+      .from('gantt').select('*').eq('card_id', cardId).single()
+    const ganttTasks: GanttTask[] = (ganttRow?.payload?.tasks ?? []) as GanttTask[]
+
+    // Fetch all documents newest first
+    const { data: docs } = await supabaseAdmin
+      .from('documents').select('*')
+      .eq('card_id', cardId).eq('is_external', false)
+      .order('report_date', { ascending: false })
+
+    if (!docs || docs.length === 0) return errRes('No internal reports found for this card', 404)
+
+    const instTemplatePath = path.join(process.cwd(), 'references', 'Park Systems Installation Passdown Report.xlsx')
+    if (!fs.existsSync(instTemplatePath)) return errRes('Installation Excel template not found on server', 500)
+
+    // Sheet 1: Gantt Chart (fresh, ExcelJS)
+    const ganttBuf = await generateGanttSheetBuffer(ganttTasks, 'Gantt Chart')
+    const sheetBufs: Buffer[] = [ganttBuf]
+    const tabNames: string[]  = ['Gantt Chart']
+
+    // Sheets 2+: one per document, newest first
+    for (const docRow of docs as DocumentRow[]) {
+      const content = normalizeInstallationContent(docRow.content) as InstallationContent
+      const tabName = docRow.report_date.replace(/-/g, '.')
+      sheetBufs.push(await generateInstallationSheetBuffer(instTemplatePath, content, tabName))
+      tabNames.push(tabName)
+    }
+
+    const buf = await combineSheets(sheetBufs, tabNames)
+    const seg = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
+    const filename = `${seg(cardRow.customer)}_${seg(cardRow.eq_id)}_installation-reports.xlsx`
+
+    return new NextResponse(buf as unknown as BodyInit, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    })
+  }
+
+  // ── Field Service export (unchanged) ──────────────────────
+  if (cardRow.type !== 'field_service') return errRes('Excel export is only supported for field_service and installation cards')
 
   const { data: docs } = await supabaseAdmin
     .from('documents').select('*')

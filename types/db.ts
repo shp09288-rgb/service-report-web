@@ -71,6 +71,10 @@ export interface GanttTask {
   duration: number
   start_date: string   // 'YYYY-MM-DD'
   complete_date: string
+  // Plan dates (optional — backward-compatible)
+  plan_duration?: number
+  plan_start_date?: string    // 'YYYY-MM-DD'
+  plan_complete_date?: string // 'YYYY-MM-DD'
 }
 
 export interface GanttPayload {

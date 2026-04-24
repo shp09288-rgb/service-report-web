@@ -81,6 +81,11 @@ export interface InstallationContent {
   start_date: string
   est_complete_date: string
 
+  // Service session info
+  service_type: string
+  start_time: string
+  end_time: string
+
   // Contact Info
   crm_case_id: string
   main_user: string
