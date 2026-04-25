@@ -7,9 +7,10 @@ import { InstallationEditor } from '@/components/editors/InstallationEditor'
 import { useAutoSave, type SaveStatus } from '@/hooks/useAutoSave'
 import { useLock } from '@/hooks/useLock'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
-import type { CardRow, DocumentRow } from '@/types/db'
+import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
 import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
+import { computeInstallationProgress, GANTT_CATEGORIES } from '@/lib/gantt-progress'
 
 type Content = FieldServiceContent | InstallationContent
 
@@ -47,10 +48,11 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
   const readOnly  = lockState.status !== 'acquired'
 
   // ── Document load ────────────────────────────────────────────
-  const [card, setCard]       = useState<CardRow | null>(null)
-  const [doc, setDoc]         = useState<DocumentRow | null>(null)
-  const [content, setContent] = useState<Content | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [card, setCard]           = useState<CardRow | null>(null)
+  const [doc, setDoc]             = useState<DocumentRow | null>(null)
+  const [content, setContent]     = useState<Content | null>(null)
+  const [ganttTasks, setGanttTasks] = useState<GanttTask[]>([])
+  const [loading, setLoading]     = useState(true)
   const [loadError, setLoadError] = useState('')
 
   // ── Dirty tracking + lock-lost state ────────────────────────
@@ -106,8 +108,10 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
     Promise.all([
       fetch(`/api/documents/${docId}`),
       fetch(`/api/cards/${cardId}`),
+      // Gantt is only valid for installation cards; returns 400 for field_service — ignore gracefully
+      fetch(`/api/cards/${cardId}/gantt`),
     ])
-      .then(async ([docRes, cardRes]) => {
+      .then(async ([docRes, cardRes, ganttRes]) => {
         if (docRes.status === 404) { setLoadError('Document not found.'); return }
         if (!docRes.ok)            { setLoadError('Failed to load document.'); return }
         if (!cardRes.ok)           { setLoadError('Failed to load card.'); return }
@@ -116,14 +120,42 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
         ])
         setDoc(docData)
         setCard(cardData)
-        // Normalize field_service content at load time so the editor
-        // always receives fully-structured data, regardless of how old
-        // or partially-migrated the stored JSON is.
-        setContent(
-          cardData.type === 'field_service'
-            ? normalizeFieldServiceContent(docData.content) as Content
-            : normalizeInstallationContent(docData.content) as Content
-        )
+
+        // Fetch gantt tasks for installation cards
+        const tasks: GanttTask[] = ganttRes.ok
+          ? ((await ganttRes.json()) as { tasks?: GanttTask[] }).tasks ?? []
+          : []
+        setGanttTasks(tasks)
+
+        if (cardData.type === 'field_service') {
+          setContent(normalizeFieldServiceContent(docData.content) as Content)
+        } else {
+          // Installation: normalize then auto-populate computed fields from Gantt
+          const base = normalizeInstallationContent(docData.content) as InstallationContent
+          if (tasks.length > 0) {
+            const computed = computeInstallationProgress(
+              tasks,
+              base.start_date,
+              base.est_complete_date,
+              docData.report_date,
+            )
+            setContent({
+              ...base,
+              committed_pct:  computed.committedProgress,
+              actual_pct:     computed.actualProgress,
+              total_days:     computed.totalDays,
+              progress_days:  computed.progressDays,
+              // Replace action_chart with auto-computed per-category %
+              action_chart: GANTT_CATEGORIES.map(cat => ({
+                item:       cat,
+                committed:  '',
+                actual_pct: computed.categoryProgress[cat] ?? 0,
+              })),
+            } as Content)
+          } else {
+            setContent(base as Content)
+          }
+        }
       })
       .catch(() => setLoadError('Network error. Check your Supabase connection.'))
       .finally(() => setLoading(false))
@@ -394,6 +426,8 @@ export function DocumentEditorClient({ cardId, docId }: Props) {
           onChange={c => handleChange(c)}
           readOnly={readOnly}
           cardSeeded={(content as InstallationContent).is_card_seeded === true}
+          ganttTasks={ganttTasks}
+          reportDate={doc!.report_date}
         />
       ) : (
         <FieldServiceEditor

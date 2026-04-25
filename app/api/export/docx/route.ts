@@ -5,7 +5,8 @@ import { buildFieldServiceSections } from '@/lib/docx-builders/field-service'
 import { buildInstallationSections } from '@/lib/docx-builders/installation'
 import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
-import { normalizeFieldServiceContent } from '@/lib/content-defaults'
+import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
+import { computeInstallationProgress, GANTT_CATEGORIES } from '@/lib/gantt-progress'
 
 function err(message: string, status: number) {
   return NextResponse.json({ error: message }, { status })
@@ -71,11 +72,31 @@ export async function POST(req: NextRequest) {
 
     const ganttTasks: GanttTask[] = (ganttRow?.payload as { tasks?: GanttTask[] })?.tasks ?? []
 
-    sections = buildInstallationSections(
-      docRow.content as InstallationContent,
-      docRow.report_date,
-      ganttTasks,
-    )
+    // Always recompute progress from Gantt tasks (don't trust stored values)
+    const base = normalizeInstallationContent(docRow.content) as InstallationContent
+    let instContent: InstallationContent = base
+    if (ganttTasks.length > 0) {
+      const cp = computeInstallationProgress(
+        ganttTasks,
+        base.start_date,
+        base.est_complete_date,
+        docRow.report_date,
+      )
+      instContent = {
+        ...base,
+        committed_pct:  cp.committedProgress,
+        actual_pct:     cp.actualProgress,
+        total_days:     cp.totalDays,
+        progress_days:  cp.progressDays,
+        action_chart: GANTT_CATEGORIES.map(cat => ({
+          item:       cat,
+          committed:  '',
+          actual_pct: cp.categoryProgress[cat] ?? 0,
+        })),
+      }
+    }
+
+    sections = buildInstallationSections(instContent, docRow.report_date, ganttTasks)
     filename = `${date}_${customer}_Installation Report.docx`
 
   } else {

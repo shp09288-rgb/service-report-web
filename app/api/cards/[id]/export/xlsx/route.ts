@@ -7,7 +7,7 @@ import * as path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
 import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
 import { MAP_A } from '@/lib/excel-parser'
-import { getProgress, GANTT_CATEGORIES } from '@/lib/gantt-progress'
+import { getProgress, GANTT_CATEGORIES, computeInstallationProgress } from '@/lib/gantt-progress'
 import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
 
@@ -132,6 +132,8 @@ async function generateInstallationSheetBuffer(
   templatePath: string,
   content: InstallationContent,
   tabName: string,
+  ganttTasks: GanttTask[],
+  reportDate: string,
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   await wb.xlsx.readFile(templatePath)
@@ -164,11 +166,30 @@ async function generateInstallationSheetBuffer(
   set(INST_MAP.start_time,        content.start_time        ?? '')
   set(INST_MAP.end_time,          content.end_time          ?? '')
 
-  // Pct as 0-1 decimal
-  set(INST_MAP.committed_pct, (content.committed_pct ?? 0) / 100)
-  set(INST_MAP.actual_pct,    (content.actual_pct    ?? 0) / 100)
-  set(INST_MAP.total_days,    content.total_days    ?? 0)
-  set(INST_MAP.progress_days, content.progress_days ?? 0)
+  // Always recompute progress from Gantt — mirrors Excel formulas
+  let committedPct = (content.committed_pct ?? 0) / 100
+  let actualPct    = (content.actual_pct    ?? 0) / 100
+  let totalDays    = content.total_days    ?? 0
+  let progressDays = content.progress_days ?? 0
+
+  if (ganttTasks.length > 0) {
+    const cp = computeInstallationProgress(
+      ganttTasks,
+      content.start_date,
+      content.est_complete_date,
+      reportDate,
+    )
+    committedPct = cp.committedProgress / 100
+    actualPct    = cp.actualProgress    / 100
+    totalDays    = cp.totalDays
+    progressDays = cp.progressDays
+  }
+
+  // Pct as 0-1 decimal (template cells are formatted as %)
+  set(INST_MAP.committed_pct, committedPct)
+  set(INST_MAP.actual_pct,    actualPct)
+  set(INST_MAP.total_days,    totalDays)
+  set(INST_MAP.progress_days, progressDays)
 
   // Detail report rows: B28, B29, ...
   const details = content.detail_report ?? []
@@ -181,126 +202,187 @@ async function generateInstallationSheetBuffer(
   return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
 
-// Build Gantt Chart sheet as ExcelJS workbook buffer (no template)
+// ── Gantt Chart sheet builder ──────────────────────────────────
+// Cell layout matches template ('Gantt Chart' sheet in LGD AP3 reference):
+//   Row 2: B2="Action", C2="Total Case#", D2="Progress %"   (headers)
+//   Rows 3-7: A=completed, B=category name, C=total, D=progress (0-1 decimal)
+//   Row 10: task table headers (A=No, B=Action, C=Category, D=Item, E=..., F=Remark, G=Status, H=Duration, I=Plan/Action, J=Start, K=Complete)
+//   Rows 12+: two rows per task (Plan row + Action row)
+//
+// Radar charts in date sheets reference 'Gantt Chart'!$B$3:$B$7 (names) and $D$3:$D$7 (pct).
+// Writing correct values to those cells makes the chart references valid.
 async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet(tabName)
 
-  const DARK_GRAY = '374151'
-  const WHITE     = 'FFFFFF'
-  const GREEN_BG  = 'D1FAE5'
-  const BLUE_BG   = 'DBEAFE'
-  const LIGHT_ALT = 'F9FAFB'
+  const NAVY    = '1F3864'
+  const BLUE    = '4472C4'
+  const WHITE   = 'FFFFFF'
+  const GREEN_B = 'D1FAE5'
+  const BLUE_B  = 'DBEAFE'
+  const GRAY_L  = 'F9FAFB'
+  const GRAY_H  = 'E5E7EB'
 
-  const headerFont = { bold: true, color: { argb: `FF${WHITE}` } }
-  const darkFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${DARK_GRAY}` } }
+  const whiteFont  = { bold: true, color: { argb: `FF${WHITE}` } }
+  const navyFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${NAVY}` } }
+  const blueFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${BLUE}` } }
+  const grayHFill  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${GRAY_H}` } }
+  const thinBorder = { style: 'thin' as const }
+  const allBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
 
-  // Row 1: Title
-  ws.mergeCells('A1:L1')
+  // ── Row 1: Title bar ─────────────────────────────────────────
+  ws.mergeCells('A1:K1')
   const titleCell = ws.getCell('A1')
   titleCell.value = 'Gantt Chart'
-  titleCell.font = { bold: true, size: 16, color: { argb: `FF${WHITE}` } }
-  titleCell.fill = darkFill
+  titleCell.font  = { bold: true, size: 14, color: { argb: `FF${WHITE}` } }
+  titleCell.fill  = navyFill
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(1).height = 28
+  ws.getRow(1).height = 22
 
-  // Row 2: empty
-  ws.getRow(2).height = 6
+  // ── Row 2: Progress summary headers ──────────────────────────
+  // NOTE: leave A2 blank (template has completed count formula there)
+  ws.getCell('B2').value = 'Action'
+  ws.getCell('C2').value = 'Total Case#'
+  ws.getCell('D2').value = 'Progress %'
+  ;['B2','C2','D2'].forEach(addr => {
+    const c = ws.getCell(addr)
+    c.font   = whiteFont
+    c.fill   = blueFill
+    c.border = allBorders
+    c.alignment = { horizontal: 'center', vertical: 'middle' }
+  })
+  ws.getRow(2).height = 15
 
-  // Rows 3-7: Progress summary
+  // ── Rows 3-7: Progress summary data ──────────────────────────
+  // Chart references: 'Gantt Chart'!$B$3:$B$7 (names), $D$3:$D$7 (pct 0-1)
   const progress = getProgress(tasks)
-  const summaryData = [
-    ['Category', 'Progress'],
-    ['TOTAL', `${progress.completed}/${progress.total} (${Math.round(progress.totalPct * 100)}%)`],
-    ...GANTT_CATEGORIES.map(cat => {
-      const cp = progress.categories[cat]
-      return [cat, `${cp?.completed ?? 0}/${cp?.total ?? 0} (${Math.round((cp?.pct ?? 0) * 100)}%)`]
-    }),
-  ]
+  GANTT_CATEGORIES.forEach((cat, idx) => {
+    const rowNum = 3 + idx
+    const cp = progress.categories[cat]
+    const completed = cp?.completed ?? 0
+    const total     = cp?.total ?? 0
+    const pctVal    = total > 0 ? cp!.pct : 0   // 0-1 decimal for chart reference
 
-  summaryData.forEach((row, ri) => {
-    const excelRow = ws.getRow(3 + ri)
-    excelRow.getCell(1).value = row[0]
-    excelRow.getCell(2).value = row[1]
-    if (ri === 0) {
-      excelRow.getCell(1).font = headerFont
-      excelRow.getCell(1).fill = darkFill
-      excelRow.getCell(2).font = headerFont
-      excelRow.getCell(2).fill = darkFill
-    } else if (ri % 2 === 0) {
-      const altFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${LIGHT_ALT}` } }
-      excelRow.getCell(1).fill = altFill
-      excelRow.getCell(2).fill = altFill
-    }
-    excelRow.getCell(1).border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
-    excelRow.getCell(2).border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+    const rA = ws.getCell(`A${rowNum}`)
+    rA.value  = completed
+    rA.border = allBorders
+    rA.alignment = { horizontal: 'center' }
+
+    const rB = ws.getCell(`B${rowNum}`)
+    rB.value  = cat
+    rB.border = allBorders
+    rB.fill   = idx % 2 === 0 ? grayHFill : { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${GRAY_L}` } }
+
+    const rC = ws.getCell(`C${rowNum}`)
+    rC.value  = total
+    rC.border = allBorders
+    rC.alignment = { horizontal: 'center' }
+
+    const rD = ws.getCell(`D${rowNum}`)
+    rD.value      = pctVal               // 0-1 decimal — chart reads this
+    rD.numFmt     = '0%'
+    rD.border     = allBorders
+    rD.alignment  = { horizontal: 'center' }
   })
 
-  // Row 8: empty
-  ws.getRow(8 + summaryData.length).height = 6
+  // ── Row 8: TOTAL summary row ──────────────────────────────────
+  ws.getCell('A8').value = progress.completed
+  ws.getCell('B8').value = 'TOTAL'
+  ws.getCell('C8').value = progress.total
+  ws.getCell('D8').value = progress.total > 0 ? progress.totalPct : 0
+  ws.getCell('D8').numFmt = '0%'
+  ;['A8','B8','C8','D8'].forEach(addr => {
+    ws.getCell(addr).border = allBorders
+    ws.getCell(addr).font   = { bold: true }
+    ws.getCell(addr).fill   = grayHFill
+  })
+  ws.getRow(8).height = 15
 
-  // Header row for task table
-  const headerRow = 3 + summaryData.length + 1
-  const headers = ['No', 'Action', 'Category', 'Item', 'Remark', 'Status', 'Plan Days', 'Plan Start', 'Plan End', 'Actual Days', 'Actual Start', 'Actual End']
-  const hRow = ws.getRow(headerRow)
-  headers.forEach((h, ci) => {
-    const cell = hRow.getCell(ci + 1)
-    cell.value = h
-    cell.font = headerFont
-    cell.fill = darkFill
-    cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
+  // ── Row 9: empty spacer ──────────────────────────────────────
+  ws.getRow(9).height = 6
+
+  // ── Row 10: Task table headers ────────────────────────────────
+  const taskHeaders = ['No', 'Action', 'Category', 'Item', 'Remark', 'Status', 'Duration', 'Plan/Action', 'Start Date', 'Complete Date']
+  const hRow = ws.getRow(10)
+  taskHeaders.forEach((h, ci) => {
+    const cell = hRow.getCell(ci + 1)  // A=1, B=2, ...
+    cell.value  = h
+    cell.font   = whiteFont
+    cell.fill   = blueFill
+    cell.border = allBorders
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
   })
   hRow.height = 20
 
-  // Task rows
-  tasks.forEach((task, ti) => {
-    const rowIdx = headerRow + 1 + ti
-    const row = ws.getRow(rowIdx)
+  // ── Rows 12+: Two rows per task (Plan + Action) ───────────────
+  let rowCursor = 12
 
-    const statusBg = task.status === 'Completed' ? GREEN_BG
-                   : task.status === 'Started'   ? BLUE_BG
+  tasks.forEach(task => {
+    const statusBg = task.status === 'Completed' ? { argb: `FF${GREEN_B}` }
+                   : task.status === 'Started'   ? { argb: `FF${BLUE_B}`  }
                    : null
+    const taskFill = statusBg
+      ? { type: 'pattern' as const, pattern: 'solid' as const, fgColor: statusBg }
+      : null
 
-    const vals = [
+    // Plan row
+    const planRow = ws.getRow(rowCursor)
+    const planVals = [
       task.no,
-      task.action ?? '',
-      task.category ?? '',
-      task.item ?? '',
-      task.remark ?? '',
-      task.status ?? '',
-      task.plan_duration ?? '',
-      task.plan_start_date ?? '',
+      task.action      ?? '',
+      task.category    ?? '',
+      task.item        ?? '',
+      task.remark      ?? '',
+      task.status      ?? '',
+      task.plan_duration != null ? task.plan_duration : '',
+      'Plan',
+      task.plan_start_date    ?? '',
       task.plan_complete_date ?? '',
-      task.duration ?? '',
-      task.start_date ?? '',
+    ]
+    planVals.forEach((v, ci) => {
+      const cell = planRow.getCell(ci + 1)
+      cell.value  = v
+      cell.border = allBorders
+      if (taskFill) cell.fill = taskFill
+    })
+    planRow.height = 16
+
+    // Action row
+    const actRow = ws.getRow(rowCursor + 1)
+    const actVals = [
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      task.duration != null ? task.duration : '',
+      'Action',
+      task.start_date    ?? '',
       task.complete_date ?? '',
     ]
-
-    vals.forEach((v, ci) => {
-      const cell = row.getCell(ci + 1)
-      cell.value = v
-      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }
-      if (statusBg) {
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${statusBg}` } }
-      }
+    actVals.forEach((v, ci) => {
+      const cell = actRow.getCell(ci + 1)
+      cell.value  = v
+      cell.border = allBorders
+      if (taskFill) cell.fill = taskFill
     })
+    actRow.height = 16
+
+    rowCursor += 2
   })
 
-  // Column widths
-  ws.columns = [
-    { width: 6 },  // No
-    { width: 20 }, // Action
-    { width: 20 }, // Category
-    { width: 30 }, // Item
-    { width: 16 }, // Remark
-    { width: 12 }, // Status
-    { width: 10 }, // Plan Days
-    { width: 14 }, // Plan Start
-    { width: 14 }, // Plan End
-    { width: 12 }, // Actual Days
-    { width: 14 }, // Actual Start
-    { width: 14 }, // Actual End
-  ]
+  // ── Column widths (matches template) ─────────────────────────
+  ws.getColumn(1).width  = 5   // No
+  ws.getColumn(2).width  = 21  // Action
+  ws.getColumn(3).width  = 16  // Category
+  ws.getColumn(4).width  = 26  // Item
+  ws.getColumn(5).width  = 22  // Remark
+  ws.getColumn(6).width  = 13  // Status
+  ws.getColumn(7).width  = 10  // Duration
+  ws.getColumn(8).width  = 10  // Plan/Action
+  ws.getColumn(9).width  = 13  // Start Date
+  ws.getColumn(10).width = 13  // Complete Date
 
   return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
@@ -414,7 +496,9 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     for (const docRow of docs as DocumentRow[]) {
       const content = normalizeInstallationContent(docRow.content) as InstallationContent
       const tabName = docRow.report_date.replace(/-/g, '.')
-      sheetBufs.push(await generateInstallationSheetBuffer(instTemplatePath, content, tabName))
+      sheetBufs.push(await generateInstallationSheetBuffer(
+        instTemplatePath, content, tabName, ganttTasks, docRow.report_date,
+      ))
       tabNames.push(tabName)
     }
 
