@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "import-excel": "tsx scripts/import-field-service-excel.ts"
+    "import-excel": "tsx scripts/import-field-service-excel.ts",
+    "create-template": "tsx scripts/create-installation-template.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
@@ -15,9 +16,11 @@
     "bcryptjs": "^3.0.3",
     "date-fns": "^3.6.0",
     "docx": "^9.6.1",
+    "docxtemplater": "^3.68.5",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "next": "^15.3.0",
+    "pizzip": "^3.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "uuid": "^10.0.0",

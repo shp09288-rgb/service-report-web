@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Document, Packer, Paragraph } from 'docx'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildFieldServiceSections } from '@/lib/docx-builders/field-service'
-import { buildInstallationSections } from '@/lib/docx-builders/installation'
+import { buildInstallationDocxFromTemplate } from '@/lib/docx-builders/installation-template'
 import type { CardRow, DocumentRow, GanttTask } from '@/types/db'
 import type { FieldServiceContent, InstallationContent } from '@/types/report'
 import { normalizeFieldServiceContent, normalizeInstallationContent } from '@/lib/content-defaults'
@@ -42,28 +42,42 @@ export async function POST(req: NextRequest) {
 
   const cardRow = card as CardRow
 
-  // Sanitize a string for use as a filename segment (remove/replace unsafe chars)
+  // Sanitize a string for use as a filename segment
   function seg(s: string): string {
     return (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
   }
 
   const date     = docRow.report_date
-  const docType  = docRow.is_external ? 'External' : 'Internal'
   const customer = seg(cardRow.customer) || 'Unknown Customer'
-  const eqId     = seg(cardRow.eq_id)
 
-  let sections: (Paragraph | object)[]
-  let filename: string
-
+  // ── Field Service — unchanged code-based approach ─────────
   if (cardRow.type === 'field_service') {
-    sections = buildFieldServiceSections(
+    const sections = buildFieldServiceSections(
       normalizeFieldServiceContent(docRow.content) as FieldServiceContent,
       docRow.report_date,
     )
-    filename = `${date}_${customer}_Field Service Report.docx`
+    const filename = `${date}_${customer}_Field Service Report.docx`
 
-  } else if (cardRow.type === 'installation') {
-    // Fetch gantt payload for this card
+    const docx = new Document({
+      sections: [{
+        properties: { page: { margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
+        children: sections as Paragraph[],
+      }],
+    })
+
+    const buffer = await Packer.toBuffer(docx)
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    })
+  }
+
+  // ── Installation — template-based approach ─────────────────
+  if (cardRow.type === 'installation') {
+    // Fetch Gantt payload
     const { data: ganttRow } = await supabaseAdmin
       .from('gantt')
       .select('payload')
@@ -72,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     const ganttTasks: GanttTask[] = (ganttRow?.payload as { tasks?: GanttTask[] })?.tasks ?? []
 
-    // Always recompute progress from Gantt tasks (don't trust stored values)
+    // Always recompute progress from Gantt tasks (do not trust stored values)
     const base = normalizeInstallationContent(docRow.content) as InstallationContent
     let instContent: InstallationContent = base
     if (ganttTasks.length > 0) {
@@ -96,33 +110,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    sections = buildInstallationSections(instContent, docRow.report_date, ganttTasks)
-    filename = `${date}_${customer}_Installation Report.docx`
+    try {
+      const buffer  = buildInstallationDocxFromTemplate(instContent, docRow.report_date, ganttTasks)
+      const filename = `${date}_${customer}_Installation Report.docx`
 
-  } else {
-    return err('Unsupported card type', 400)
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+        },
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Template export failed'
+      return err(msg, 500)
+    }
   }
 
-  // 1.27 cm margins (720 twips) to match compact Park Systems report layout
-  const docx = new Document({
-    sections: [{
-      properties: {
-        page: {
-          margin: { top: 720, bottom: 720, left: 720, right: 720 },
-        },
-      },
-      children: sections as Paragraph[],
-    }],
-  })
-
-  const buffer = await Packer.toBuffer(docx)
-  const uint8  = new Uint8Array(buffer)
-
-  return new NextResponse(uint8, {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-    },
-  })
+  return err('Unsupported card type', 400)
 }
