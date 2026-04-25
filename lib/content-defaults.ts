@@ -54,6 +54,22 @@ export const defaultFieldServiceContent = (card?: CardRow): FieldServiceContent 
   }
 }
 
+// ── Shared helper: normalize a single NoteImage entry ────────────────
+// Used by both Field Service and Installation normalizers.
+function normalizeNoteImage(img: unknown, strFn: (v: unknown, fb?: string) => string): NoteImage | null {
+  if (!img || typeof img !== 'object') return null
+  const m = img as Record<string, unknown>
+  const dataUrl = strFn(m.data_url)
+  if (!dataUrl) return null // skip entries with no embeddable data
+  return {
+    key:      strFn(m.key) || crypto.randomUUID(),
+    data_url: dataUrl,
+    caption:  strFn(m.caption),
+    width:    typeof m.width  === 'number' ? m.width  : undefined,
+    height:   typeof m.height === 'number' ? m.height : undefined,
+  }
+}
+
 // ── Field Service content normalizer ─────────────────────────────────
 // Accepts raw DB JSON (unknown) and returns a fully-valid FieldServiceContent.
 // Handles every known legacy format so the editor never receives bad data.
@@ -100,20 +116,8 @@ export function normalizeFieldServiceContent(raw: unknown): FieldServiceContent 
       })
     : []
 
-  // ── Helper: normalize a single note_images entry ──────────────
-  function normalizeNoteImage(img: unknown): NoteImage | null {
-    if (!img || typeof img !== 'object') return null
-    const m = img as Record<string, unknown>
-    const dataUrl = str(m.data_url)
-    if (!dataUrl) return null // skip entries with no embeddable data
-    return {
-      key:     str(m.key) || crypto.randomUUID(),
-      data_url: dataUrl,
-      caption: str(m.caption),
-      width:   typeof m.width  === 'number' ? m.width  : undefined,
-      height:  typeof m.height === 'number' ? m.height : undefined,
-    }
-  }
+  // Bind str into the shared helper
+  const normImg = (img: unknown) => normalizeNoteImage(img, str)
 
   // ── Helper: migrate old url-based images[] to note_images + note text ─
   // Old images had { key, url, caption } — URL-based, not embeddable.
@@ -133,7 +137,7 @@ export function normalizeFieldServiceContent(raw: unknown): FieldServiceContent 
 
       if (url.startsWith('data:')) {
         // It's already a data_url — can embed
-        const ni = normalizeNoteImage({ key: str(m.key), data_url: url, caption })
+        const ni = normImg({ key: str(m.key), data_url: url, caption })
         if (ni) note_images.push(ni)
       } else if (url) {
         // External URL — cannot embed; preserve as note text
@@ -185,7 +189,7 @@ export function normalizeFieldServiceContent(raw: unknown): FieldServiceContent 
 
     // ── Current format: { title, note, progress_pct, note_images } ─
     const note_images: NoteImage[] = Array.isArray(it.note_images)
-      ? it.note_images.map(normalizeNoteImage).filter((x): x is NoteImage => x !== null)
+      ? it.note_images.map(normImg).filter((x): x is NoteImage => x !== null)
       : []
 
     return {
@@ -267,7 +271,7 @@ export const defaultInstallationContent = (card?: CardRow): InstallationContent 
     progress_days:         0,
     action_chart:          [{ item: '', committed: '', actual_pct: 0 }],
     critical_item_summary: '',
-    detail_report:         [{ title: '', content: '' }],
+    detail_report:         [{ title: '', content: '', note_images: [] }],
     next_plan:             '',
     data_location:         '',
   }
@@ -302,20 +306,27 @@ export function normalizeInstallationContent(raw: any): InstallationContent {
       .join('\n')
   }
 
+  // Bind str into the shared helper for installation normalizer
+  const normInstImg = (img: unknown) => normalizeNoteImage(img, str)
+
   // Migrate old critical_items → detail_report
-  let detail_report: { title: string; content: string }[] = []
+  let detail_report: { title: string; content: string; note_images: NoteImage[] }[] = []
   if (Array.isArray(r.detail_report)) {
     detail_report = (r.detail_report as Record<string, unknown>[]).map(it => ({
-      title:   str(it.title),
-      content: str(it.content),
+      title:       str(it.title),
+      content:     str(it.content),
+      note_images: Array.isArray(it.note_images)
+        ? (it.note_images as unknown[]).map(normInstImg).filter((x): x is NoteImage => x !== null)
+        : [],
     }))
   } else if (Array.isArray(r.critical_items)) {
     detail_report = (r.critical_items as Record<string, unknown>[]).map(it => ({
-      title:   str(it.title),
-      content: [str(it.detail), str(it.next_plan)].filter(Boolean).join('\n'),
+      title:       str(it.title),
+      content:     [str(it.detail), str(it.next_plan)].filter(Boolean).join('\n'),
+      note_images: [],
     }))
   }
-  if (detail_report.length === 0) detail_report.push({ title: '', content: '' })
+  if (detail_report.length === 0) detail_report.push({ title: '', content: '', note_images: [] })
 
   // Migrate total_cycle_time (old string) → total_days
   let total_days = num(r.total_days)

@@ -105,7 +105,7 @@ export interface InstallationContent {
   critical_item_summary: string
 
   // Detail Report (numbered items)
-  detail_report: { title: string; content: string }[]
+  detail_report: { title: string; content: string; note_images?: NoteImage[] }[]
 
   // Next Plan (single text block)
   next_plan: string

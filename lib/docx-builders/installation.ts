@@ -1,6 +1,7 @@
 import {
   AlignmentType,
   BorderStyle,
+  ImageRun,
   Paragraph,
   ShadingType,
   Table,
@@ -10,7 +11,7 @@ import {
   VerticalAlign,
   WidthType,
 } from 'docx'
-import type { InstallationContent } from '@/types/report'
+import type { InstallationContent, NoteImage } from '@/types/report'
 import type { GanttTask } from '@/types/db'
 import { GANTT_CATEGORIES, getProgress } from '@/lib/gantt-progress'
 
@@ -140,6 +141,16 @@ function emptyRow(cols: number, msg = '(none)'): TableRow {
       children: [para([run(msg, { italics: true, color: '9CA3AF', size: 16 })])],
     })],
   })
+}
+
+// ── Image scale helper ────────────────────────────────────────
+function scaleImage(img: NoteImage): { width: number; height: number } {
+  const maxW = 320
+  const w = img.width  ?? 240
+  const h = img.height ?? 180
+  if (w <= maxW) return { width: w, height: h }
+  const ratio = maxW / w
+  return { width: maxW, height: Math.max(60, Math.round(h * ratio)) }
 }
 
 // ── Main builder ──────────────────────────────────────────────
@@ -420,7 +431,7 @@ export function buildInstallationSections(
 
   // ── 5. Detail Report (left) + Next Plan (right) ───────────
   const details = content.detail_report ?? []
-  const detailChildren: (Paragraph | Table)[] = []
+  const detailChildren: (Paragraph)[] = []
   if (details.length === 0) {
     detailChildren.push(para([run('(none)', { italics: true, color: '9CA3AF' })]))
   } else {
@@ -429,6 +440,29 @@ export function buildInstallationSections(
       if (item.content) {
         item.content.split('\n').forEach(line => detailChildren.push(para([run(line)])))
       }
+      // Embed inline images
+      const noteImages = Array.isArray(item.note_images) ? item.note_images : []
+      noteImages.forEach((img: NoteImage) => {
+        if (!img?.data_url) return
+        try {
+          const [, base64] = img.data_url.split(',')
+          if (!base64) return
+          const scaled = scaleImage(img)
+          detailChildren.push(new Paragraph({
+            spacing: { before: 40, after: 0 },
+            children: [new ImageRun({
+              data: Buffer.from(base64, 'base64'),
+              transformation: scaled,
+              type: 'png',
+            })],
+          }))
+          if (img.caption?.trim()) {
+            detailChildren.push(para([run(img.caption.trim(), { italics: true, color: '9CA3AF', size: 16 })]))
+          }
+        } catch {
+          // ignore malformed image
+        }
+      })
       if (i < details.length - 1) detailChildren.push(para([run('')]))
     })
   }

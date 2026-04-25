@@ -1,6 +1,6 @@
 'use client'
 
-import { InstallationContent } from '@/types/report'
+import type { InstallationContent, NoteImage } from '@/types/report'
 
 const SITE_SURVEY_OPTIONS = ['VC-A', 'VC-B', 'VC-C', 'VC-D', 'VC-E', 'Other']
 const NOISE_LEVEL_OPTIONS = ['< 60dB', '60~65dB', '65~70dB', '> 70dB']
@@ -10,6 +10,32 @@ interface Props {
   onChange: (content: InstallationContent) => void
   readOnly?: boolean
   cardSeeded?: boolean
+}
+
+// ── Read a clipboard/file image → NoteImage ──────────────────
+function readImageFile(file: File, onDone: (img: NoteImage) => void) {
+  const reader = new FileReader()
+  reader.onload = ev => {
+    const data_url = ev.target?.result as string
+    if (!data_url) return
+    const htmlImg = new window.Image()
+    htmlImg.onload = () => {
+      onDone({
+        key:      crypto.randomUUID(),
+        data_url,
+        caption:  '',
+        width:    htmlImg.naturalWidth,
+        height:   htmlImg.naturalHeight,
+      })
+    }
+    htmlImg.src = data_url
+  }
+  reader.readAsDataURL(file)
+}
+
+// ── Safe accessor for detail_report note_images ───────────────
+function safeNoteImages(item: InstallationContent['detail_report'][0]): NoteImage[] {
+  return Array.isArray(item.note_images) ? item.note_images : []
 }
 
 export function InstallationEditor({ content, onChange, readOnly = false, cardSeeded = false }: Props) {
@@ -23,15 +49,61 @@ export function InstallationEditor({ content, onChange, readOnly = false, cardSe
     const next = content.action_chart.map((r, idx) => idx === i ? { ...r, [key]: val } : r)
     set('action_chart', next)
   }
-  function addChartRow()      { set('action_chart', [...content.action_chart, { item: '', committed: '', actual_pct: 0 }]) }
+  function addChartRow()           { set('action_chart', [...content.action_chart, { item: '', committed: '', actual_pct: 0 }]) }
   function removeChartRow(i: number) { set('action_chart', content.action_chart.filter((_, idx) => idx !== i)) }
 
+  // ── Detail Report helpers ─────────────────────────────────────
   function setDetail(i: number, key: 'title' | 'content', val: string) {
     const next = content.detail_report.map((r, idx) => idx === i ? { ...r, [key]: val } : r)
     set('detail_report', next)
   }
-  function addDetail()        { set('detail_report', [...content.detail_report, { title: '', content: '' }]) }
+  function addDetail()           { set('detail_report', [...content.detail_report, { title: '', content: '', note_images: [] }]) }
   function removeDetail(i: number) { set('detail_report', content.detail_report.filter((_, idx) => idx !== i)) }
+
+  // ── Note image helpers for detail items ───────────────────────
+  function addDetailImage(detailIdx: number, img: NoteImage) {
+    set('detail_report', content.detail_report.map((it, i) =>
+      i === detailIdx
+        ? { ...it, note_images: [...safeNoteImages(it), img] }
+        : it
+    ))
+  }
+  function updateDetailImage(detailIdx: number, imgIdx: number, patch: Partial<NoteImage>) {
+    set('detail_report', content.detail_report.map((it, i) => {
+      if (i !== detailIdx) return it
+      return {
+        ...it,
+        note_images: safeNoteImages(it).map((img, j) => j === imgIdx ? { ...img, ...patch } : img),
+      }
+    }))
+  }
+  function removeDetailImage(detailIdx: number, imgIdx: number) {
+    set('detail_report', content.detail_report.map((it, i) => {
+      if (i !== detailIdx) return it
+      return { ...it, note_images: safeNoteImages(it).filter((_, j) => j !== imgIdx) }
+    }))
+  }
+
+  // ── Image paste handler ───────────────────────────────────────
+  function handlePasteOnDetail(e: React.ClipboardEvent, detailIdx: number) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) readImageFile(file, img => addDetailImage(detailIdx, img))
+        return
+      }
+    }
+  }
+
+  // ── File-picker fallback ──────────────────────────────────────
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>, detailIdx: number) {
+    const file = e.target.files?.[0]
+    if (file) readImageFile(file, img => addDetailImage(detailIdx, img))
+    e.target.value = ''
+  }
 
   // ── Style tokens ──────────────────────────────────────────────
   const inp = 'w-full border border-gray-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500'
@@ -39,12 +111,12 @@ export function InstallationEditor({ content, onChange, readOnly = false, cardSe
   const lbl = 'bg-gray-100 border-r border-gray-300 px-2 py-1.5 text-xs font-medium text-gray-700 flex items-center whitespace-nowrap shrink-0'
   const sec = 'bg-gray-600 text-white text-xs font-semibold px-3 py-1.5 tracking-wide uppercase'
 
-  const numInput = (val: number, onChange: (n: number) => void, min = 0, max?: number, cls = 'w-14') => (
+  const numInput = (val: number, onChangeFn: (n: number) => void, min = 0, max?: number, cls = 'w-14') => (
     <input
       type="number" min={min} max={max} step={1}
       className={`border border-gray-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 ${cls}`}
       value={val}
-      onChange={e => onChange(Math.max(min, max !== undefined ? Math.min(max, Number(e.target.value)) : Number(e.target.value)))}
+      onChange={e => onChangeFn(Math.max(min, max !== undefined ? Math.min(max, Number(e.target.value)) : Number(e.target.value)))}
       disabled={readOnly}
     />
   )
@@ -282,10 +354,11 @@ export function InstallationEditor({ content, onChange, readOnly = false, cardSe
       {/* ── Detail Report (left) + Next Plan (right) ──────────── */}
       <div className="grid grid-cols-[1fr_300px] border-t border-gray-300">
         <div className="border-r border-gray-300">
-          <div className={`${sec} text-center`}>  Detail Report</div>
+          <div className={`${sec} text-center`}>Detail Report</div>
           <div className="p-2 space-y-2">
             {content.detail_report.map((item, i) => (
               <div key={i} className="border border-gray-200 rounded p-2 space-y-1">
+                {/* Title row */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-gray-500 shrink-0">{i + 1}.</span>
                   <input type="text" className={`${inp} flex-1`} placeholder="Title"
@@ -294,8 +367,64 @@ export function InstallationEditor({ content, onChange, readOnly = false, cardSe
                     <button onClick={() => removeDetail(i)} className="text-red-400 hover:text-red-600 text-xs shrink-0">✕</button>
                   )}
                 </div>
-                <textarea rows={4} className={ta} placeholder="Detail content"
-                  value={item.content} onChange={e => setDetail(i, 'content', e.target.value)} disabled={readOnly} />
+
+                {/* Content textarea — paste handler intercepts image paste */}
+                <textarea rows={4} className={ta} placeholder="Detail content (Ctrl+V to paste screenshot)"
+                  value={item.content}
+                  onChange={e => setDetail(i, 'content', e.target.value)}
+                  onPaste={readOnly ? undefined : e => handlePasteOnDetail(e, i)}
+                  disabled={readOnly}
+                />
+
+                {/* Inline images */}
+                {safeNoteImages(item).map((img, j) => (
+                  <div key={img.key} className="mt-1 pt-1 border-t border-gray-100">
+                    <div className="relative inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.data_url}
+                        alt={img.caption || `Screenshot ${j + 1}`}
+                        style={{ maxWidth: 320, maxHeight: 240, display: 'block', objectFit: 'contain' }}
+                      />
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => removeDetailImage(i, j)}
+                          title="Remove image"
+                          className="absolute top-0 right-0 bg-white border border-gray-300 text-gray-400 hover:text-red-500 text-[9px] leading-none px-[3px] py-[1px]"
+                        >✕</button>
+                      )}
+                    </div>
+                    {readOnly ? (
+                      img.caption ? <div className="text-[10px] text-gray-500 italic mt-[2px]">{img.caption}</div> : null
+                    ) : (
+                      <input
+                        type="text"
+                        className="mt-[2px] block border-0 border-b border-gray-200 px-0 py-[1px] text-[10px] text-gray-500 italic bg-transparent focus:outline-none focus:border-blue-400 w-full"
+                        style={{ maxWidth: 320 }}
+                        placeholder="Add caption…"
+                        value={img.caption}
+                        onChange={e => updateDetailImage(i, j, { caption: e.target.value })}
+                      />
+                    )}
+                  </div>
+                ))}
+
+                {/* File picker hint — only when editing */}
+                {!readOnly && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400 select-none">Ctrl+V to paste screenshot</span>
+                    <label className="text-[10px] text-gray-500 hover:text-blue-600 cursor-pointer border border-gray-300 px-1.5 py-[1px] rounded-sm select-none">
+                      Insert image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e => handleFilePick(e, i)}
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
             ))}
             {!readOnly && (
