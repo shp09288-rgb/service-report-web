@@ -138,6 +138,9 @@ export function buildInstallationDocxFromTemplate(
     eq_id:       s(content.eq_id),
     est_complete_date: s(content.est_complete_date),
     email:       s(content.email),
+    service_type: s(content.service_type),
+    start_time:   s(content.start_time),
+    end_time:     s(content.end_time),
 
     // Progress
     committed_pct:  fmtPct(committedPct),

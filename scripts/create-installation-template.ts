@@ -231,6 +231,12 @@ function buildSystemInfo(): Table {
         labelCell('Est. Complete Date', 1, 10), valueCell('{est_complete_date}', 1, 24),
         labelCell('Main User E-mail',   1, 10), valueCell('{email}',             1, 23),
       ]}),
+      // Row 5: Service Type / Start Time / End Time
+      new TableRow({ children: [
+        labelCell('Service Type', 1, 10), valueCell('{service_type}', 1, 23),
+        labelCell('Start Time',   1, 10), valueCell('{start_time}',   1, 24),
+        labelCell('End Time',     1, 10), valueCell('{end_time}',     1, 23),
+      ]}),
     ],
   })
 }
