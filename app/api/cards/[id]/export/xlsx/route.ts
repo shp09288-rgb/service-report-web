@@ -252,15 +252,165 @@ async function generateInstallationSheetBuffer(
   return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
 
-// ── Gantt Chart sheet builder ──────────────────────────────────
-// Cell layout matches template ('Gantt Chart' sheet in LGD AP3 reference):
-//   Row 2: B2="Action", C2="Total Case#", D2="Progress %"   (headers)
-//   Rows 3-7: A=completed, B=category name, C=total, D=progress (0-1 decimal)
-//   Row 10: task table headers (A=No, B=Action, C=Category, D=Item, E=..., F=Remark, G=Status, H=Duration, I=Plan/Action, J=Start, K=Complete)
-//   Rows 12+: two rows per task (Plan row + Action row)
-//
-// Radar charts in date sheets reference 'Gantt Chart'!$B$3:$B$7 (names) and $D$3:$D$7 (pct).
-// Writing correct values to those cells makes the chart references valid.
+// ── Date serial helper ────────────────────────────────────────
+// Excel date serial = days since Dec 30, 1899 (1900 leap-year bug accounted for).
+function dateToSerial(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return null
+  return Math.floor(d.getTime() / 86400000) + 25569 + 1
+}
+
+// ── Gantt task row XML (inline-string, no sharedStrings dependency) ──
+// Style indices match Gantt Chart.xlsx rows 12 (Plan) and 13 (Action),
+// verified by XML inspection of references/Gantt Chart.xlsx.
+function generateGanttTaskRowsXml(tasks: GanttTask[]): string {
+  const iStr = (col: string, row: number, s: number, val: string | null | undefined) => {
+    const v = (val ?? '').trim()
+    if (!v) return `<c r="${col}${row}" s="${s}"/>`
+    return `<c r="${col}${row}" s="${s}" t="inlineStr"><is><t>${escapeXml(v)}</t></is></c>`
+  }
+  const numC = (col: string, row: number, s: number, val: number | null) =>
+    val != null ? `<c r="${col}${row}" s="${s}"><v>${val}</v></c>`
+                : `<c r="${col}${row}" s="${s}"/>`
+
+  const rows: string[] = []
+  let rn = 12
+
+  for (const task of tasks) {
+    const planStart = dateToSerial(task.plan_start_date)
+    const planEnd   = dateToSerial(task.plan_complete_date)
+    const actStart  = dateToSerial(task.start_date)
+    const actEnd    = dateToSerial(task.complete_date)
+    const no        = task.no != null ? Number(task.no) : null
+
+    const pr = rn       // plan row
+    const ar = rn + 1   // action row
+
+    // Status: computed from action row actual dates
+    const statusVal = actEnd ? 'Completed' : actStart ? 'Started' : 'Planned'
+    const statusFml = `_xlfn.IFS($K${ar}&lt;&gt;"","Completed",$J${ar}&lt;&gt;"","Started",$J${ar}="","Planned")`
+    const durFml    = `IF($K${ar}&lt;&gt;"",$K${ar}-$J${ar}+1,"")`
+
+    // Plan row ─ styles: A=51 B=52 C=53 D=54 E=55 F=52 G=56 H=61 I=45 J=46 K=46
+    rows.push(
+      `<row r="${pr}" spans="1:87" ht="15" customHeight="1" thickTop="1" x14ac:dyDescent="0.25">` +
+      numC('A', pr, 51, no) +
+      iStr('B', pr, 52, task.action) +
+      iStr('C', pr, 53, task.category) +
+      iStr('D', pr, 54, task.item) +
+      `<c r="E${pr}" s="55"/>` +
+      iStr('F', pr, 52, task.remark) +
+      `<c r="G${pr}" s="56" t="str" cm="1"><f t="array" ref="G${pr}">${statusFml}</f><v>${escapeXml(statusVal)}</v></c>` +
+      (task.plan_duration != null ? `<c r="H${pr}" s="61"><v>${task.plan_duration}</v></c>` : `<c r="H${pr}" s="61"/>`) +
+      iStr('I', pr, 45, 'Plan') +
+      numC('J', pr, 46, planStart) +
+      numC('K', pr, 46, planEnd) +
+      `</row>`
+    )
+
+    // Action row ─ styles: A=64 B=65 C=52 D=66 E=67 F=65 G=68 H=69 I=47 J=47 K=48
+    rows.push(
+      `<row r="${ar}" spans="1:87" ht="15" customHeight="1" thickBot="1" x14ac:dyDescent="0.3">` +
+      `<c r="A${ar}" s="64"/>` +
+      `<c r="B${ar}" s="65"/>` +
+      `<c r="C${ar}" s="52"/>` +
+      `<c r="D${ar}" s="66"/>` +
+      `<c r="E${ar}" s="67"/>` +
+      `<c r="F${ar}" s="65"/>` +
+      `<c r="G${ar}" s="68"/>` +
+      `<c r="H${ar}" s="69"><f>${durFml}</f><v>${task.duration ?? ''}</v></c>` +
+      iStr('I', ar, 47, 'Action') +
+      numC('J', ar, 47, actStart) +
+      numC('K', ar, 48, actEnd) +
+      `</row>`
+    )
+
+    rn += 2
+  }
+
+  return rows.join('\n')
+}
+
+// ── Build Gantt sheet from Gantt Chart.xlsx template (JSZip) ──
+// Loads references/Gantt Chart.xlsx, clears task rows 12+, injects
+// new rows from `tasks`, and returns a Buffer.  The template preserves
+// timeline header formulas, progress-summary formulas (D3:D7), and
+// the conditional-formatting rules that draw the Gantt timeline bars.
+async function buildGanttFromTemplate(tasks: GanttTask[]): Promise<Buffer> {
+  const tplPath = path.join(process.cwd(), 'references', 'Gantt Chart.xlsx')
+  if (!fs.existsSync(tplPath)) {
+    // Fallback: ExcelJS plain sheet (no timeline bars)
+    return generateGanttSheetBuffer(tasks, 'Gantt Chart')
+  }
+
+  const zip = await JSZip.loadAsync(fs.readFileSync(tplPath))
+
+  let sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('text') ?? ''
+
+  // Remove task rows (12+) keeping header rows 1-11 intact
+  const closeTag = '</sheetData>'
+  const closeIdx = sheetXml.indexOf(closeTag)
+  const beforeClose = sheetXml.slice(0, closeIdx)
+  const afterClose  = sheetXml.slice(closeIdx)           // starts with </sheetData>
+
+  const row12Idx = beforeClose.search(/<row\s+r="12"[\s>]/)
+  const headerPart = row12Idx >= 0 ? beforeClose.slice(0, row12Idx) : beforeClose
+
+  sheetXml = headerPart + generateGanttTaskRowsXml(tasks) + afterClose
+  zip.file('xl/worksheets/sheet1.xml', sheetXml)
+
+  // Strip any external defined names that would cause broken refs
+  let wbXml = await zip.file('xl/workbook.xml')?.async('text') ?? ''
+  wbXml = wbXml.replace(/<definedName\b[^>]*>[^<]*\[\d+\][^<]*<\/definedName>/g, '')
+  zip.file('xl/workbook.xml', wbXml)
+
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
+}
+
+// ── Shared-strings → inline-strings conversion ────────────────
+// Date-sheet XML cells carry t="s" references into the date-sheet's
+// own sharedStrings.xml.  When the sheet XML is transplanted into the
+// combined workbook (which uses Gantt Chart.xlsx's sharedStrings), the
+// indices no longer map correctly.  Converting all t="s" cells to
+// t="inlineStr" removes the shared-string dependency entirely.
+async function inlineSharedStrings(dateBuf: Buffer): Promise<string> {
+  const zip = await JSZip.loadAsync(dateBuf)
+
+  const ssXml    = await zip.file('xl/sharedStrings.xml')?.async('text') ?? ''
+  let   sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('text') ?? ''
+
+  // Build index → text lookup (handles plain <t> and rich-text <r><t>)
+  const strings: string[] = []
+  for (const m of ssXml.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    const texts: string[] = []
+    for (const t of m[1].matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)) texts.push(t[1])
+    strings.push(
+      texts.join('')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&apos;/g, "'"),
+    )
+  }
+
+  if (strings.length === 0) return sheetXml   // nothing to convert
+
+  sheetXml = sheetXml.replace(
+    /<c(\s[^>]*?)\bt="s"\b([^>]*)>([\s\S]*?)<\/c>/g,
+    (_full, a1, a2, inner) => {
+      const vMatch = inner.match(/<v>(\d+)<\/v>/)
+      if (!vMatch) return _full
+      const str = strings[parseInt(vMatch[1])] ?? ''
+      const attrs = (a1 + a2).replace(/\s+/g, ' ').trim()
+      if (!str) return `<c ${attrs}/>`
+      return `<c ${attrs} t="inlineStr"><is><t>${escapeXml(str)}</t></is></c>`
+    },
+  )
+
+  return sheetXml
+}
+
+// ── Gantt Chart sheet builder (ExcelJS fallback) ──────────────
+// Used when references/Gantt Chart.xlsx is missing.
 async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet(tabName)
@@ -439,14 +589,23 @@ async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Pr
 
 // ── Installation multi-sheet combiner (preserves drawings) ────
 // Strategy:
-//   Sheet 1 = ganttBuf (ExcelJS-built, no drawing files)
-//   Sheets 2+ = dateBufs (ExcelJS round-trip of Excel template; preserves drawing)
-//   Drawing/chart files are copied once from the first date sheet so that
-//   the radar chart referencing 'Gantt Chart'!$B$3:$D$7 remains valid.
+//   Sheet 1 = ganttBuf (from Gantt Chart.xlsx JSZip — has timeline bars)
+//   Sheets 2+ = dateBufs (ExcelJS round-trip of Park Systems template)
+//
+// ExcelJS strips chart/drawing files during round-trip, so we load the
+// ORIGINAL Park Systems template (instTemplatePath) with JSZip to obtain the
+// actual drawing1.xml, chart1.xml etc.  Chart data refs '[1]Gantt Chart'
+// (external workbook) are rewritten to 'Gantt Chart' (internal sheet).
+//
+// Date-sheet cells use shared-string indices from the ExcelJS buffer's own
+// sharedStrings.xml.  Since that table is incompatible with the Gantt
+// Chart.xlsx sharedStrings in the base ZIP, we convert every t="s" cell to
+// t="inlineStr" so the text is self-contained.
 async function combineInstallationSheets(
-  ganttBuf:  Buffer,
-  dateBufs:  Buffer[],
-  tabNames:  string[],   // tabNames[0]='Gantt Chart', tabNames[1..]= date tabs
+  ganttBuf:         Buffer,
+  dateBufs:         Buffer[],
+  tabNames:         string[],        // [0]='Gantt Chart', [1..]= date tabs
+  instTemplatePath: string,          // path to Park Systems Installation template
 ): Promise<Buffer> {
   const baseZip    = await JSZip.loadAsync(ganttBuf)
   const baseWbXml  = await baseZip.file('xl/workbook.xml')?.async('text') ?? ''
@@ -457,57 +616,84 @@ async function combineInstallationSheets(
   const wsRelEntries: string[] = []
   const ctAddEntries: string[] = []
 
-  // Sheet 1 is already in baseZip as sheet1.xml (ExcelJS always writes sheet1.xml)
+  // ── Sheet 1: Gantt Chart (already in baseZip as sheet1.xml) ──
   sheetEntries.push(`<sheet name="${escapeXml(tabNames[0])}" sheetId="1" r:id="wsId1"/>`)
   wsRelEntries.push(
     `<Relationship Id="wsId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`,
   )
 
-  let drawingsCopied = false
+  // ── Load the original Park Systems template to get drawing/chart files ──
+  // ExcelJS strips these during round-trip, so we must source them directly
+  // from the unmodified template file.
+  const tplZip = await JSZip.loadAsync(fs.readFileSync(instTemplatePath))
+
+  // Collect chart/drawing file paths that exist in the original template
+  const tplDrawingPaths = Object.keys(tplZip.files).filter(
+    p => !tplZip.files[p].dir && (p.startsWith('xl/drawings/') || p.startsWith('xl/charts/')),
+  )
+
+  // Determine the drawing relationship ID used by the template's sheet1 rels
+  const tplSheetRels = await tplZip.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('text') ?? ''
+
+  // Ensure drawing tag is present in date-sheet XML.
+  // ExcelJS may strip <drawing> but we need it for every date sheet.
+  // Extract r:id from the template's sheet rels if present.
+  const drawingRelMatch = tplSheetRels.match(
+    /Id="([^"]+)"[^>]*Type="[^"]*\/drawing"[^>]*Target="([^"]+)"/,
+  )
+  const drawingRelId = drawingRelMatch?.[1] ?? 'rId1'
+
+  // Copy chart/drawing files from ORIGINAL template (once for all date sheets)
+  for (const relPath of tplDrawingPaths) {
+    const entry = tplZip.files[relPath]
+    if (relPath.startsWith('xl/charts/') && relPath.endsWith('.xml') && !relPath.includes('_rels')) {
+      // Fix external workbook refs: '[1]Gantt Chart'!... → 'Gantt Chart'!...
+      let xml = await entry.async('text')
+      xml = xml.replace(/'\[(\d+)\]([^']+)'/g, "'$2'")
+      baseZip.file(relPath, xml)
+    } else {
+      baseZip.file(relPath, await entry.async('uint8array'))
+    }
+  }
+
+  // Harvest Content-Type overrides for the drawing/chart files
+  const tplCT = await tplZip.file('[Content_Types].xml')?.async('text') ?? ''
+  for (const m of tplCT.matchAll(/<Override\s[^>]*PartName="([^"]+)"[^>]*\/>/g)) {
+    const partName = m[1]
+    if (
+      (partName.startsWith('/xl/drawings/') || partName.startsWith('/xl/charts/')) &&
+      !baseCT.includes(partName)
+    ) {
+      ctAddEntries.push(m[0])
+    }
+  }
+
+  // ── Sheets 2+: one per date report ──────────────────────────
+  // Build a fixed sheet rels string that every date sheet will use.
+  // It points to the same drawing1.xml that all date sheets share.
+  const sharedDrawingRels = tplSheetRels.trim()
 
   for (let i = 0; i < dateBufs.length; i++) {
-    const n        = i + 2
-    const sheetZip = await JSZip.loadAsync(dateBufs[i])
+    const n = i + 2
 
-    // Copy sheet XML as-is (do NOT strip drawing tags)
-    const rawXml = await sheetZip.file('xl/worksheets/sheet1.xml')?.async('text')
-    if (rawXml) {
-      baseZip.file(`xl/worksheets/sheet${n}.xml`, rawXml)
+    // Convert shared-string refs → inline strings (indices are incompatible
+    // between ExcelJS buffer sharedStrings and Gantt Chart.xlsx sharedStrings)
+    let sheetXml = await inlineSharedStrings(dateBufs[i])
+
+    // Ensure <drawing r:id="..."/> is present so Excel renders the chart.
+    // ExcelJS may have preserved or stripped it.  Inject if missing.
+    if (!sheetXml.includes('<drawing ') && drawingRelMatch) {
+      sheetXml = sheetXml.replace(
+        '</worksheet>',
+        `<drawing r:id="${drawingRelId}"/></worksheet>`,
+      )
     }
 
-    // Copy sheet rels (carries the <drawing> relationship pointer)
-    const relsData = await sheetZip.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('uint8array')
-    if (relsData) {
-      baseZip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, relsData)
-    }
+    baseZip.file(`xl/worksheets/sheet${n}.xml`, sheetXml)
 
-    // Copy drawing + chart files once (from the first date sheet only)
-    if (!drawingsCopied) {
-      for (const relPath of Object.keys(sheetZip.files)) {
-        const entry = sheetZip.files[relPath]
-        if (entry.dir) continue
-        if (
-          relPath.startsWith('xl/drawings/') ||
-          relPath.startsWith('xl/charts/')
-        ) {
-          const data = await entry.async('uint8array')
-          baseZip.file(relPath, data)
-        }
-      }
-
-      // Harvest CT <Override> entries for drawings/charts from this buffer
-      const firstCT = await sheetZip.file('[Content_Types].xml')?.async('text') ?? ''
-      for (const m of firstCT.matchAll(/<Override\s[^>]*PartName="([^"]+)"[^>]*\/>/g)) {
-        const partName = m[1]
-        if (
-          (partName.startsWith('/xl/drawings/') || partName.startsWith('/xl/charts/')) &&
-          !baseCT.includes(partName)
-        ) {
-          ctAddEntries.push(m[0])
-        }
-      }
-
-      drawingsCopied = true
+    // Every date sheet shares the same drawing rels (pointing to drawing1.xml)
+    if (sharedDrawingRels) {
+      baseZip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, sharedDrawingRels)
     }
 
     ctAddEntries.push(
@@ -634,8 +820,10 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     const instTemplatePath = path.join(process.cwd(), 'references', 'Park Systems Installation Passdown Report.xlsx')
     if (!fs.existsSync(instTemplatePath)) return errRes('Installation Excel template not found on server', 500)
 
-    // Sheet 1: Gantt Chart (fresh, ExcelJS — no drawing files)
-    const ganttBuf   = await generateGanttSheetBuffer(ganttTasks, 'Gantt Chart')
+    // Sheet 1: Gantt Chart — JSZip injection into Gantt Chart.xlsx template.
+    // Preserves timeline headers, progress-formula rows, and conditional
+    // formatting (Gantt bars).  Falls back to ExcelJS if template is missing.
+    const ganttBuf   = await buildGanttFromTemplate(ganttTasks)
     const dateBufs:  Buffer[] = []
     const dateTabNames: string[] = []
 
@@ -649,7 +837,7 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
       dateTabNames.push(tabName)
     }
 
-    const buf = await combineInstallationSheets(ganttBuf, dateBufs, ['Gantt Chart', ...dateTabNames])
+    const buf = await combineInstallationSheets(ganttBuf, dateBufs, ['Gantt Chart', ...dateTabNames], instTemplatePath)
     const seg = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
     const filename = `${seg(cardRow.customer)}_${seg(cardRow.eq_id)}_installation-reports.xlsx`
 

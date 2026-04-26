@@ -133,16 +133,25 @@ export async function buildInstallationDocxFromTemplate(
   // ── Docxtemplater setup ───────────────────────────────────
   const zip = new PizZip(templateBuf)
 
-  const modules: object[] = []
-  if (radarPngBuf) {
-    const pngBuf = radarPngBuf  // captured in closure
-    modules.push(new ImageModule({
+  // The ImageModule MUST always be present.
+  // If it is absent and the template contains a {%radar_chart} tag,
+  // docxtemplater throws "Cannot read properties of undefined (reading '0')".
+  // Use a 1×1 transparent PNG as a fallback so the tag is always handled.
+  const FALLBACK_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'base64',
+  )
+  const finalPngBuf  = radarPngBuf ?? FALLBACK_PNG
+  const imgSize: [number, number] = radarPngBuf ? [280, 280] : [1, 1]
+
+  const modules: object[] = [
+    new ImageModule({
       centered:  false,
       fileType:  'docx',
-      getImage() { return pngBuf },
-      getSize()  { return [280, 280] },
-    }))
-  }
+      getImage() { return finalPngBuf },
+      getSize()  { return imgSize },
+    }),
+  ]
 
   const doc = new Docxtemplater(zip, {
     modules,
@@ -182,9 +191,6 @@ export async function buildInstallationDocxFromTemplate(
 
     // Action chart loop
     action_chart: actionChart,
-
-    // Radar chart image (tag: {%radar_chart})
-    radar_chart: radarPngBuf ?? Buffer.alloc(0),
 
     // Summary & detail
     critical_item_summary: s(content.critical_item_summary),
