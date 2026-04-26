@@ -14,9 +14,14 @@ import * as fs   from 'fs'
 import * as path from 'path'
 import PizZip        from 'pizzip'
 import Docxtemplater from 'docxtemplater'
+import sharp         from 'sharp'
 import type { InstallationContent } from '@/types/report'
 import type { GanttTask }           from '@/types/db'
 import { GANTT_CATEGORIES, getProgress } from '@/lib/gantt-progress'
+import { generateRadarChartSvg }         from '@/lib/radar-chart-svg'
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const ImageModule = require('docxtemplater-image-module-free')
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -24,7 +29,6 @@ function fmtPct(n: number | null | undefined): string {
   return `${Math.min(100, Math.max(0, Math.round(n ?? 0)))}%`
 }
 
-// Sanitise a value that will be inserted into a docx text node
 function s(v: unknown): string {
   if (v == null) return ''
   return String(v).trim()
@@ -32,11 +36,11 @@ function s(v: unknown): string {
 
 // ── Main builder ──────────────────────────────────────────────
 
-export function buildInstallationDocxFromTemplate(
+export async function buildInstallationDocxFromTemplate(
   content: InstallationContent,
   reportDate: string,
   ganttTasks: GanttTask[],
-): Buffer {
+): Promise<Buffer> {
   // Load template
   const templatePath = path.join(
     process.cwd(),
@@ -56,7 +60,6 @@ export function buildInstallationDocxFromTemplate(
   const actualPct    = Math.min(100, Math.max(0, Math.round(content.actual_pct    ?? 0)))
 
   // ── action_chart rows ─────────────────────────────────────
-  // Use content.action_chart if populated; fall back to GANTT_CATEGORIES
   const actionChart = (content.action_chart ?? []).length > 0
     ? content.action_chart.map(row => ({
         item:       s(row.item),
@@ -73,15 +76,13 @@ export function buildInstallationDocxFromTemplate(
       })
 
   // ── detail_report items ───────────────────────────────────
-  // Each item: { dt_num, dt_title, dt_content }
-  // note_images are omitted (template approach does not embed images)
   const detailReport = (content.detail_report ?? []).map((item, i) => ({
     dt_num:     i + 1,
     dt_title:   s(item.title),
     dt_content: s(item.content),
   }))
 
-  // ── Gantt rows (flat: 2 rows per task — Plan then Action) ─
+  // ── Gantt rows ────────────────────────────────────────────
   const ganttRows: object[] = []
   for (const task of ganttTasks) {
     ganttRows.push({
@@ -110,13 +111,44 @@ export function buildInstallationDocxFromTemplate(
     })
   }
 
-  // ── Render ────────────────────────────────────────────────
+  // ── Radar chart PNG ───────────────────────────────────────
+  // Generate category values from action_chart or progress data
+  const radarValues = GANTT_CATEGORIES.map(cat => {
+    const row = actionChart.find(r => r.item === cat)
+    if (row) {
+      const numStr = String(row.actual_pct).replace('%', '').trim()
+      return parseFloat(numStr) || 0
+    }
+    return 0
+  })
+
+  let radarPngBuf: Buffer | null = null
+  try {
+    const svgStr = generateRadarChartSvg([...GANTT_CATEGORIES], radarValues, 360)
+    radarPngBuf  = await sharp(Buffer.from(svgStr)).png().toBuffer()
+  } catch (e) {
+    console.warn('[installation-template] Radar chart PNG generation failed:', e)
+  }
+
+  // ── Docxtemplater setup ───────────────────────────────────
   const zip = new PizZip(templateBuf)
+
+  const modules: object[] = []
+  if (radarPngBuf) {
+    const pngBuf = radarPngBuf  // captured in closure
+    modules.push(new ImageModule({
+      centered:  false,
+      fileType:  'docx',
+      getImage() { return pngBuf },
+      getSize()  { return [280, 280] },
+    }))
+  }
+
   const doc = new Docxtemplater(zip, {
+    modules,
     paragraphLoop: true,
     linebreaks:    true,
-    // Prevent errors on undefined tags; return empty string instead
-    nullGetter() { return '' },
+    nullGetter()   { return '' },
   })
 
   doc.render({
@@ -151,6 +183,9 @@ export function buildInstallationDocxFromTemplate(
     // Action chart loop
     action_chart: actionChart,
 
+    // Radar chart image (tag: {%radar_chart})
+    radar_chart: radarPngBuf ?? Buffer.alloc(0),
+
     // Summary & detail
     critical_item_summary: s(content.critical_item_summary),
     detail_report:         detailReport,
@@ -158,6 +193,12 @@ export function buildInstallationDocxFromTemplate(
     // Next plan & data location
     next_plan:      s(content.next_plan),
     data_location:  s(content.data_location),
+
+    // Work Completion
+    wc_type:     s(content.work_completion?.type),
+    wc_reason:   s(content.work_completion?.reason),
+    wc_detail:   s(content.work_completion?.detail),
+    wc_time_log: s(content.work_completion?.time_log),
 
     // Gantt loop
     gantt_rows: ganttRows,

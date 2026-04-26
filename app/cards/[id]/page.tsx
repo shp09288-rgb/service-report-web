@@ -223,10 +223,11 @@ export default function CardPage({ params }: { params: Params }) {
     if (!card) return
     setExporting(true)
     setExportError('')
-    const err = await downloadBlob(
-      `/api/cards/${id}/export/xlsx`,
-      `${card.customer}_${card.eq_id}_field-service-reports.xlsx`,
-    )
+    const today = todayISO()
+    const filename = card.type === 'installation'
+      ? `${today}_${card.customer}_Installation Report.xlsx`
+      : `${card.customer}_${card.eq_id}_field-service-reports.xlsx`
+    const err = await downloadBlob(`/api/cards/${id}/export/xlsx`, filename)
     if (err) setExportError(err)
     setExporting(false)
   }
@@ -383,7 +384,7 @@ export default function CardPage({ params }: { params: Params }) {
                 Gantt Chart →
               </Link>
             )}
-            {card!.type === 'field_service' && (
+            {(card!.type === 'field_service' || card!.type === 'installation') && (
               <button
                 onClick={handleExportXlsx}
                 disabled={exporting}

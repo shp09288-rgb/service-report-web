@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const buffer  = buildInstallationDocxFromTemplate(instContent, docRow.report_date, ganttTasks)
+      const buffer  = await buildInstallationDocxFromTemplate(instContent, docRow.report_date, ganttTasks)
       const filename = `${date}_${customer}_Installation Report.docx`
 
       return new NextResponse(new Uint8Array(buffer), {

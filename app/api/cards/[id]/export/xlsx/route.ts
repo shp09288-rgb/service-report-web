@@ -199,6 +199,56 @@ async function generateInstallationSheetBuffer(
     ws.getCell(addr).value = text ?? ''
   })
 
+  // Work Completion — rows 34–38
+  const wc = content.work_completion
+  if (wc) {
+    const NAVY    = '1F3864'
+    const BLUE_BG = 'D9E2F3'
+    const navyFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${NAVY}` } }
+    const blueFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${BLUE_BG}` } }
+    const thin     = { style: 'thin' as const }
+    const borders  = { top: thin, bottom: thin, left: thin, right: thin }
+    const whiteFont = { bold: true, color: { argb: 'FFFFFFFF' } }
+    const navyFont  = { bold: true, color: { argb: `FF${NAVY}` } }
+
+    // Row 34: section header
+    ws.mergeCells('B34:X34')
+    const hdr = ws.getCell('B34')
+    hdr.value = 'Work Completion — 작업 종료 후 근무 형태'
+    hdr.fill  = navyFill
+    hdr.font  = whiteFont
+    hdr.alignment = { horizontal: 'center', vertical: 'middle' }
+    hdr.border = borders
+    ws.getRow(34).height = 18
+
+    // Helper: write label + value row
+    const wcRow = (rowNum: number, label: string, value: string) => {
+      ws.mergeCells(`B${rowNum}:G${rowNum}`)
+      const lbl = ws.getCell(`B${rowNum}`)
+      lbl.value = label
+      lbl.fill  = blueFill
+      lbl.font  = navyFont
+      lbl.alignment = { horizontal: 'left', vertical: 'middle' }
+      lbl.border = borders
+
+      ws.mergeCells(`H${rowNum}:X${rowNum}`)
+      const val = ws.getCell(`H${rowNum}`)
+      val.value = value
+      val.border = borders
+      val.alignment = { wrapText: true, vertical: 'top' }
+      ws.getRow(rowNum).height = 18
+    }
+
+    // Check mark indicators for type row
+    const TYPES = ['사무실(구미 숙소) 복귀', '재택근무 전환', '추가 외근 수행', '업무 종료']
+    const typeStr = TYPES.map(t => (t === wc.type ? `☑ ${t}` : `☐ ${t}`)).join('   ')
+
+    wcRow(35, '근무 형태', typeStr)
+    wcRow(36, '전환 사유', wc.reason ?? '')
+    wcRow(37, '수행 업무', wc.detail ?? '')
+    wcRow(38, '수행 시간', wc.time_log ?? '')
+  }
+
   return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
 
@@ -387,6 +437,103 @@ async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Pr
   return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
 }
 
+// ── Installation multi-sheet combiner (preserves drawings) ────
+// Strategy:
+//   Sheet 1 = ganttBuf (ExcelJS-built, no drawing files)
+//   Sheets 2+ = dateBufs (ExcelJS round-trip of Excel template; preserves drawing)
+//   Drawing/chart files are copied once from the first date sheet so that
+//   the radar chart referencing 'Gantt Chart'!$B$3:$D$7 remains valid.
+async function combineInstallationSheets(
+  ganttBuf:  Buffer,
+  dateBufs:  Buffer[],
+  tabNames:  string[],   // tabNames[0]='Gantt Chart', tabNames[1..]= date tabs
+): Promise<Buffer> {
+  const baseZip    = await JSZip.loadAsync(ganttBuf)
+  const baseWbXml  = await baseZip.file('xl/workbook.xml')?.async('text') ?? ''
+  const baseWbRels = await baseZip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
+  const baseCT     = await baseZip.file('[Content_Types].xml')?.async('text') ?? ''
+
+  const sheetEntries: string[] = []
+  const wsRelEntries: string[] = []
+  const ctAddEntries: string[] = []
+
+  // Sheet 1 is already in baseZip as sheet1.xml (ExcelJS always writes sheet1.xml)
+  sheetEntries.push(`<sheet name="${escapeXml(tabNames[0])}" sheetId="1" r:id="wsId1"/>`)
+  wsRelEntries.push(
+    `<Relationship Id="wsId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`,
+  )
+
+  let drawingsCopied = false
+
+  for (let i = 0; i < dateBufs.length; i++) {
+    const n        = i + 2
+    const sheetZip = await JSZip.loadAsync(dateBufs[i])
+
+    // Copy sheet XML as-is (do NOT strip drawing tags)
+    const rawXml = await sheetZip.file('xl/worksheets/sheet1.xml')?.async('text')
+    if (rawXml) {
+      baseZip.file(`xl/worksheets/sheet${n}.xml`, rawXml)
+    }
+
+    // Copy sheet rels (carries the <drawing> relationship pointer)
+    const relsData = await sheetZip.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('uint8array')
+    if (relsData) {
+      baseZip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, relsData)
+    }
+
+    // Copy drawing + chart files once (from the first date sheet only)
+    if (!drawingsCopied) {
+      for (const relPath of Object.keys(sheetZip.files)) {
+        const entry = sheetZip.files[relPath]
+        if (entry.dir) continue
+        if (
+          relPath.startsWith('xl/drawings/') ||
+          relPath.startsWith('xl/charts/')
+        ) {
+          const data = await entry.async('uint8array')
+          baseZip.file(relPath, data)
+        }
+      }
+
+      // Harvest CT <Override> entries for drawings/charts from this buffer
+      const firstCT = await sheetZip.file('[Content_Types].xml')?.async('text') ?? ''
+      for (const m of firstCT.matchAll(/<Override\s[^>]*PartName="([^"]+)"[^>]*\/>/g)) {
+        const partName = m[1]
+        if (
+          (partName.startsWith('/xl/drawings/') || partName.startsWith('/xl/charts/')) &&
+          !baseCT.includes(partName)
+        ) {
+          ctAddEntries.push(m[0])
+        }
+      }
+
+      drawingsCopied = true
+    }
+
+    ctAddEntries.push(
+      `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    )
+    sheetEntries.push(`<sheet name="${escapeXml(tabNames[i + 1])}" sheetId="${n}" r:id="wsId${n}"/>`)
+    wsRelEntries.push(
+      `<Relationship Id="wsId${n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${n}.xml"/>`,
+    )
+  }
+
+  baseZip.file('xl/workbook.xml', baseWbXml.replace(
+    /<sheets>[\s\S]*?<\/sheets>/,
+    `<sheets>${sheetEntries.join('')}</sheets>`,
+  ))
+  baseZip.file('xl/_rels/workbook.xml.rels', baseWbRels
+    .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
+    .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
+  )
+  if (ctAddEntries.length > 0) {
+    baseZip.file('[Content_Types].xml', baseCT.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
+  }
+
+  return baseZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
+}
+
 // ── Multi-sheet combiner (JSZip structural merge) ─────────────
 async function combineSheets(
   sheetBufs: Buffer[],
@@ -487,22 +634,22 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
     const instTemplatePath = path.join(process.cwd(), 'references', 'Park Systems Installation Passdown Report.xlsx')
     if (!fs.existsSync(instTemplatePath)) return errRes('Installation Excel template not found on server', 500)
 
-    // Sheet 1: Gantt Chart (fresh, ExcelJS)
-    const ganttBuf = await generateGanttSheetBuffer(ganttTasks, 'Gantt Chart')
-    const sheetBufs: Buffer[] = [ganttBuf]
-    const tabNames: string[]  = ['Gantt Chart']
+    // Sheet 1: Gantt Chart (fresh, ExcelJS — no drawing files)
+    const ganttBuf   = await generateGanttSheetBuffer(ganttTasks, 'Gantt Chart')
+    const dateBufs:  Buffer[] = []
+    const dateTabNames: string[] = []
 
-    // Sheets 2+: one per document, newest first
+    // Sheets 2+: one per document, newest first (Excel template round-trip — preserves drawings)
     for (const docRow of docs as DocumentRow[]) {
       const content = normalizeInstallationContent(docRow.content) as InstallationContent
       const tabName = docRow.report_date.replace(/-/g, '.')
-      sheetBufs.push(await generateInstallationSheetBuffer(
+      dateBufs.push(await generateInstallationSheetBuffer(
         instTemplatePath, content, tabName, ganttTasks, docRow.report_date,
       ))
-      tabNames.push(tabName)
+      dateTabNames.push(tabName)
     }
 
-    const buf = await combineSheets(sheetBufs, tabNames)
+    const buf = await combineInstallationSheets(ganttBuf, dateBufs, ['Gantt Chart', ...dateTabNames])
     const seg = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
     const filename = `${seg(cardRow.customer)}_${seg(cardRow.eq_id)}_installation-reports.xlsx`
 

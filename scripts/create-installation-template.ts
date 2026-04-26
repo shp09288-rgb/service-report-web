@@ -283,7 +283,7 @@ function buildCycleTimeAndActionChart(): Table {
     ],
   })
 
-  // Right cell: Action chart with loop
+  // Right cell: Action chart with loop + radar chart image placeholder
   const actionChartInner = new Table({
     width: wp(100),
     borders: { ...borders_none, insideHorizontal: BD_THIN, insideVertical: BD_THIN },
@@ -312,6 +312,14 @@ function buildCycleTimeAndActionChart(): Table {
     ],
   })
 
+  // Radar chart image placeholder paragraph — docxtemplater-image-module-free
+  // replaces {%radar_chart} with the generated PNG at export time.
+  const radarPlaceholder = new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 60, after: 40 },
+    children: [new TextRun({ text: '{%radar_chart}', size: 18, font: 'Calibri', color: C_DARK })],
+  })
+
   return new Table({
     width: wp(100),
     borders: borders_outer,
@@ -329,7 +337,7 @@ function buildCycleTimeAndActionChart(): Table {
         }),
         new TableCell({
           width: wp(60), borders: borders_all, verticalAlign: VerticalAlign.TOP,
-          children: [actionChartInner],
+          children: [actionChartInner, radarPlaceholder],
         }),
       ]}),
     ],
@@ -417,7 +425,38 @@ function buildDataLocation(): Table {
   })
 }
 
-// ── Section 7: Gantt Task Schedule ───────────────────────────
+// ── Section 7: Work Completion ────────────────────────────────
+function buildWorkCompletion(): Table {
+  return new Table({
+    width: wp(100),
+    borders: borders_outer,
+    rows: [
+      new TableRow({ children: [sectionHeader('Work Completion — 작업 종료 후 근무 형태', 4)] }),
+      // Row: type
+      new TableRow({ children: [
+        labelCell('근무 형태', 1, 12),
+        valueCell('{wc_type}', 3, 88),
+      ]}),
+      // Row: reason
+      new TableRow({ children: [
+        labelCell('전환 사유', 1, 12),
+        valueCell('{wc_reason}', 3, 88),
+      ]}),
+      // Row: detail
+      new TableRow({ children: [
+        labelCell('수행 업무', 1, 12),
+        valueCell('{wc_detail}', 3, 88),
+      ]}),
+      // Row: time log
+      new TableRow({ children: [
+        labelCell('수행 시간', 1, 12),
+        valueCell('{wc_time_log}', 3, 88),
+      ]}),
+    ],
+  })
+}
+
+// ── Section 8: Gantt Task Schedule ───────────────────────────
 function buildGantt(): Table {
   return new Table({
     width: wp(100),
@@ -488,6 +527,8 @@ async function main() {
         buildDetailAndNextPlan(),
         spacer(80),
         buildDataLocation(),
+        spacer(80),
+        buildWorkCompletion(),
         spacer(80),
         buildGantt(),
       ],

@@ -1,5 +1,5 @@
 import type { CardRow } from '@/types/db'
-import type { CriticalItem, NoteImage, FieldServiceContent, InstallationContent } from '@/types/report'
+import type { CriticalItem, NoteImage, FieldServiceContent, InstallationContent, WorkCompletion } from '@/types/report'
 
 interface CardMeta {
   customer: string
@@ -274,6 +274,7 @@ export const defaultInstallationContent = (card?: CardRow): InstallationContent 
     detail_report:         [{ title: '', content: '', note_images: [] }],
     next_plan:             '',
     data_location:         '',
+    work_completion:       { type: '', reason: '', detail: '', time_log: '' },
   }
 }
 
@@ -335,6 +336,17 @@ export function normalizeInstallationContent(raw: any): InstallationContent {
     if (m) total_days = parseInt(m[0], 10)
   }
 
+  // Normalize work_completion
+  const wcRaw = r.work_completion && typeof r.work_completion === 'object'
+    ? r.work_completion as Record<string, unknown>
+    : {}
+  const work_completion: WorkCompletion = {
+    type:     str(wcRaw.type),
+    reason:   str(wcRaw.reason),
+    detail:   str(wcRaw.detail),
+    time_log: str(wcRaw.time_log),
+  }
+
   return {
     is_card_seeded:        bool(r.is_card_seeded),
     fse_name:              str(r.fse_name),
@@ -364,5 +376,6 @@ export function normalizeInstallationContent(raw: any): InstallationContent {
     detail_report,
     next_plan:             str(r.next_plan),
     data_location:         str(r.data_location),
+    work_completion,
   }
 }

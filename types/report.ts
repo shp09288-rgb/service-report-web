@@ -112,4 +112,7 @@ export interface InstallationContent {
 
   // Data Location
   data_location: string
+
+  // Work Completion (재택근무 전환 시 작성 항목)
+  work_completion?: WorkCompletion
 }

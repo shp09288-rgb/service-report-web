@@ -1,6 +1,15 @@
 'use client'
 
 import { useMemo } from 'react'
+import {
+  RadarChart as RechartsRadar,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  ResponsiveContainer,
+  Tooltip,
+} from 'recharts'
 import type { InstallationContent, NoteImage } from '@/types/report'
 import type { GanttTask } from '@/types/db'
 import { computeInstallationProgress, GANTT_CATEGORIES } from '@/lib/gantt-progress'
@@ -8,6 +17,7 @@ import { computeInstallationProgress, GANTT_CATEGORIES } from '@/lib/gantt-progr
 const SITE_SURVEY_OPTIONS = ['VC-A', 'VC-B', 'VC-C', 'VC-D', 'VC-E', 'Other']
 const NOISE_LEVEL_OPTIONS = ['< 60dB', '60~65dB', '65~70dB', '> 70dB']
 const SERVICE_TYPE_OPTIONS = ['Warranty', 'Service Contract', 'Billable', 'Non-Billable']
+const WORK_COMPLETION_TYPES = ['사무실(구미 숙소) 복귀', '재택근무 전환', '추가 외근 수행', '업무 종료']
 
 interface Props {
   content: InstallationContent
@@ -84,6 +94,12 @@ export function InstallationEditor({
     onChange({ ...content, [key]: val })
   }
 
+  const wc = content.work_completion ?? { type: '', reason: '', detail: '', time_log: '' }
+  function setWC(key: 'type' | 'reason' | 'detail' | 'time_log', val: string) {
+    onChange({ ...content, work_completion: { ...wc, [key]: val } })
+  }
+  const isRemote = wc.type === '재택근무 전환'
+
   function setDetail(i: number, key: 'title' | 'content', val: string) {
     set('detail_report', content.detail_report.map((r, idx) => idx === i ? { ...r, [key]: val } : r))
   }
@@ -127,7 +143,7 @@ export function InstallationEditor({
   const S = {
     inp: 'w-full border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500',
     ta:  'w-full border border-gray-300 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y disabled:bg-gray-50 disabled:text-gray-500',
-    lbl: 'bg-gray-900 text-white text-[11px] font-medium px-2 py-1.5 flex items-center whitespace-nowrap shrink-0',
+    lbl: 'bg-[#D9E2F3] text-[#1B3769] text-[11px] font-medium px-2 py-1.5 flex items-center whitespace-nowrap shrink-0',
     sh:  'bg-[#4472C4] text-white text-[11px] font-bold px-2 py-[5px] tracking-wide',
     ro:  'w-full border border-gray-200 px-2 py-1.5 text-xs bg-gray-50 text-gray-600',
   }
@@ -362,24 +378,56 @@ export function InstallationEditor({
           </div>
 
           {computed ? (
-            /* Auto-computed table from GANTT_CATEGORIES */
-            <div className="p-2 space-y-1.5">
-              {GANTT_CATEGORIES.map(cat => {
-                const pct = computed.categoryProgress[cat] ?? 0
-                const total = ganttTasks?.filter(t => t.action === cat).length ?? 0
-                const done  = ganttTasks?.filter(t => t.action === cat && t.status === 'Completed').length ?? 0
-                return (
-                  <div key={cat} className="flex items-center gap-2">
-                    <span className="text-[10px] text-gray-600 shrink-0 w-36 truncate">{cat}</span>
-                    <div className="flex-1 h-2 bg-gray-200 rounded overflow-hidden">
-                      <div className="h-full bg-[#4472C4] transition-all" style={{ width: `${pct}%` }} />
+            /* Auto-computed RadarChart from GANTT_CATEGORIES */
+            <div>
+              <ResponsiveContainer width="100%" height={220}>
+                <RechartsRadar
+                  data={GANTT_CATEGORIES.map(cat => ({
+                    subject: cat,
+                    value:   computed.categoryProgress[cat] ?? 0,
+                    full:    100,
+                  }))}
+                  margin={{ top: 12, right: 24, bottom: 12, left: 24 }}
+                >
+                  <PolarGrid stroke="#B8CCE4" />
+                  <PolarAngleAxis
+                    dataKey="subject"
+                    tick={{ fontSize: 9, fill: '#1B3769', fontWeight: 600 }}
+                  />
+                  <PolarRadiusAxis
+                    angle={90}
+                    domain={[0, 100]}
+                    tick={{ fontSize: 8, fill: '#888' }}
+                    tickCount={5}
+                  />
+                  <Radar
+                    name="Progress"
+                    dataKey="value"
+                    stroke="#4472C4"
+                    fill="#4472C4"
+                    fillOpacity={0.30}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#4472C4', stroke: 'white', strokeWidth: 1.5 }}
+                  />
+                  <Tooltip formatter={(v) => [`${v ?? 0}%`, 'Progress']} />
+                </RechartsRadar>
+              </ResponsiveContainer>
+              {/* Small reference table below the chart */}
+              <div className="px-2 pb-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                {GANTT_CATEGORIES.map(cat => {
+                  const pct   = computed.categoryProgress[cat] ?? 0
+                  const total = ganttTasks?.filter(t => t.action === cat).length ?? 0
+                  const done  = ganttTasks?.filter(t => t.action === cat && t.status === 'Completed').length ?? 0
+                  return (
+                    <div key={cat} className="flex items-center justify-between text-[9px] leading-4">
+                      <span className="text-gray-600 truncate flex-1">{cat}</span>
+                      <span className="ml-1 shrink-0 font-semibold text-[#4472C4]">
+                        {done}/{total} ({pct}%)
+                      </span>
                     </div>
-                    <span className="text-[10px] text-gray-500 w-20 text-right shrink-0">
-                      {done}/{total} ({pct}%)
-                    </span>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
           ) : (
             /* Manual input table (fallback when no Gantt data) */
@@ -539,6 +587,90 @@ export function InstallationEditor({
         <div className="flex-1 p-1">
           <input type="text" className={S.inp} value={content.data_location}
             onChange={e => set('data_location', e.target.value)} disabled={readOnly} />
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════
+          WORK COMPLETION  (재택근무 전환 시 작성 항목)
+      ══════════════════════════════════════════════════════════ */}
+      <div className="border-t border-gray-300">
+        <div className={S.sh}>Work Completion — 작업 종료 후 근무 형태</div>
+        <div className="p-2 space-y-2">
+
+          {/* Type + Time Log */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex items-center gap-1 shrink-0">
+              <span className={`${S.lbl} rounded-sm`} style={{ minWidth: 80 }}>근무 형태</span>
+              <select
+                className={`${S.inp} border border-gray-300 rounded-sm`}
+                style={{ width: 190 }}
+                value={wc.type}
+                onChange={e => setWC('type', e.target.value)}
+                disabled={readOnly}
+              >
+                <option value="">— 선택 —</option>
+                {WORK_COMPLETION_TYPES.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-1 flex-1 min-w-40">
+              <span className={`${S.lbl} rounded-sm`} style={{ minWidth: 60 }}>Time Log</span>
+              <input
+                type="text"
+                className={`${S.inp} border border-gray-300 rounded-sm flex-1`}
+                placeholder="09:00 ~ 18:00"
+                value={wc.time_log}
+                onChange={e => setWC('time_log', e.target.value)}
+                disabled={readOnly}
+              />
+            </div>
+          </div>
+
+          {/* Remote work detail — highlighted when 재택근무 전환 is selected */}
+          <div className={`rounded border ${isRemote ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-gray-50'} p-2 space-y-1.5`}>
+            <div className="text-[10px] font-semibold text-gray-500 mb-1">
+              재택 근무 전환 시 (재택 선택 시 필수 작성)
+              {isRemote && <span className="ml-2 text-blue-600 font-bold">★ 필수</span>}
+            </div>
+
+            {/* 전환 사유 */}
+            <div className="flex items-center gap-1">
+              <span className={`${S.lbl} rounded-sm ${isRemote ? 'ring-1 ring-blue-400' : ''}`} style={{ minWidth: 80 }}>전환 사유</span>
+              <input
+                type="text"
+                className={`${S.inp} border rounded-sm flex-1 ${isRemote ? 'border-blue-400 focus:ring-blue-500' : 'border-gray-300'}`}
+                placeholder="재택 전환 사유를 입력하세요"
+                value={wc.reason}
+                onChange={e => setWC('reason', e.target.value)}
+                disabled={readOnly}
+              />
+            </div>
+
+            {/* 수행 업무 */}
+            <div className="flex items-center gap-1">
+              <span className={`${S.lbl} rounded-sm ${isRemote ? 'ring-1 ring-blue-400' : ''}`} style={{ minWidth: 80 }}>수행 업무</span>
+              <input
+                type="text"
+                className={`${S.inp} border rounded-sm flex-1 ${isRemote ? 'border-blue-400 focus:ring-blue-500' : 'border-gray-300'}`}
+                placeholder="재택 수행 업무를 입력하세요"
+                value={wc.detail}
+                onChange={e => setWC('detail', e.target.value)}
+                disabled={readOnly}
+              />
+            </div>
+
+            {/* 수행 시간 */}
+            <div className="flex items-center gap-1">
+              <span className={`${S.lbl} rounded-sm ${isRemote ? 'ring-1 ring-blue-400' : ''}`} style={{ minWidth: 80 }}>수행 시간</span>
+              <input
+                type="text"
+                className={`${S.inp} border rounded-sm flex-1 ${isRemote ? 'border-blue-400 focus:ring-blue-500' : 'border-gray-300'}`}
+                placeholder="예: 17:30 ~ 19:00 (1h 30m)"
+                value={wc.time_log}
+                onChange={e => setWC('time_log', e.target.value)}
+                disabled={readOnly || true}   /* driven by Time Log above */
+              />
+            </div>
+          </div>
         </div>
       </div>
 
