@@ -14,7 +14,6 @@ import * as fs   from 'fs'
 import * as path from 'path'
 import PizZip        from 'pizzip'
 import Docxtemplater from 'docxtemplater'
-import sharp         from 'sharp'
 import type { InstallationContent } from '@/types/report'
 import type { GanttTask }           from '@/types/db'
 import { GANTT_CATEGORIES, getProgress } from '@/lib/gantt-progress'
@@ -124,10 +123,12 @@ export async function buildInstallationDocxFromTemplate(
 
   let radarPngBuf: Buffer | null = null
   try {
-    const svgStr = generateRadarChartSvg([...GANTT_CATEGORIES], radarValues, 360)
-    radarPngBuf  = await sharp(Buffer.from(svgStr)).png().toBuffer()
+    const svgStr  = generateRadarChartSvg([...GANTT_CATEGORIES], radarValues, 360)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sharpFn = require('sharp') as typeof import('sharp')
+    radarPngBuf   = await sharpFn(Buffer.from(svgStr)).png().toBuffer()
   } catch (e) {
-    console.warn('[installation-template] Radar chart PNG generation failed:', e)
+    console.warn('[installation-template] Radar chart PNG generation failed (sharp may be unavailable):', e)
   }
 
   // ── Docxtemplater setup ───────────────────────────────────

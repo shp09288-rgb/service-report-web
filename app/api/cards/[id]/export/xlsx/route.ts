@@ -128,130 +128,6 @@ const INST_MAP = {
   end_time:         'T11',
 }
 
-async function generateInstallationSheetBuffer(
-  templatePath: string,
-  content: InstallationContent,
-  tabName: string,
-  ganttTasks: GanttTask[],
-  reportDate: string,
-): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook()
-  await wb.xlsx.readFile(templatePath)
-  const ws = wb.worksheets[0]
-  ws.name = tabName
-
-  const set = (addr: string, value: string | number) => {
-    ws.getCell(addr).value = value
-  }
-
-  set(INST_MAP.fse_name,          content.fse_name          ?? '')
-  set(INST_MAP.report_date,       content.report_date       ?? '')
-  set(INST_MAP.customer,          content.customer          ?? '')
-  set(INST_MAP.model,             content.model             ?? '')
-  set(INST_MAP.sid,               content.sid               ?? '')
-  set(INST_MAP.eq_id,             content.eq_id             ?? '')
-  set(INST_MAP.location,          content.location          ?? '')
-  set(INST_MAP.site_survey,       content.site_survey       ?? '')
-  set(INST_MAP.noise_level,       content.noise_level       ?? '')
-  set(INST_MAP.start_date,        content.start_date        ?? '')
-  set(INST_MAP.est_complete_date, content.est_complete_date ?? '')
-  set(INST_MAP.crm_case_id,       content.crm_case_id       ?? '')
-  set(INST_MAP.main_user,         content.main_user         ?? '')
-  set(INST_MAP.tel,               content.tel               ?? '')
-  set(INST_MAP.email,             content.email             ?? '')
-  set(INST_MAP.critical_item_summary, content.critical_item_summary ?? '')
-  set(INST_MAP.next_plan,         content.next_plan         ?? '')
-  set(INST_MAP.data_location,     content.data_location     ?? '')
-  set(INST_MAP.service_type,      content.service_type      ?? '')
-  set(INST_MAP.start_time,        content.start_time        ?? '')
-  set(INST_MAP.end_time,          content.end_time          ?? '')
-
-  // Always recompute progress from Gantt — mirrors Excel formulas
-  let committedPct = (content.committed_pct ?? 0) / 100
-  let actualPct    = (content.actual_pct    ?? 0) / 100
-  let totalDays    = content.total_days    ?? 0
-  let progressDays = content.progress_days ?? 0
-
-  if (ganttTasks.length > 0) {
-    const cp = computeInstallationProgress(
-      ganttTasks,
-      content.start_date,
-      content.est_complete_date,
-      reportDate,
-    )
-    committedPct = cp.committedProgress / 100
-    actualPct    = cp.actualProgress    / 100
-    totalDays    = cp.totalDays
-    progressDays = cp.progressDays
-  }
-
-  // Pct as 0-1 decimal (template cells are formatted as %)
-  set(INST_MAP.committed_pct, committedPct)
-  set(INST_MAP.actual_pct,    actualPct)
-  set(INST_MAP.total_days,    totalDays)
-  set(INST_MAP.progress_days, progressDays)
-
-  // Detail report rows: B28, B29, ...
-  const details = content.detail_report ?? []
-  details.forEach((item, idx) => {
-    const addr = `B${28 + idx}`
-    const text = item.title ? `${item.title}\n${item.content}` : item.content
-    ws.getCell(addr).value = text ?? ''
-  })
-
-  // Work Completion — rows 34–38
-  const wc = content.work_completion
-  if (wc) {
-    const NAVY    = '1F3864'
-    const BLUE_BG = 'D9E2F3'
-    const navyFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${NAVY}` } }
-    const blueFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${BLUE_BG}` } }
-    const thin     = { style: 'thin' as const }
-    const borders  = { top: thin, bottom: thin, left: thin, right: thin }
-    const whiteFont = { bold: true, color: { argb: 'FFFFFFFF' } }
-    const navyFont  = { bold: true, color: { argb: `FF${NAVY}` } }
-
-    // Row 34: section header
-    ws.mergeCells('B34:X34')
-    const hdr = ws.getCell('B34')
-    hdr.value = 'Work Completion — 작업 종료 후 근무 형태'
-    hdr.fill  = navyFill
-    hdr.font  = whiteFont
-    hdr.alignment = { horizontal: 'center', vertical: 'middle' }
-    hdr.border = borders
-    ws.getRow(34).height = 18
-
-    // Helper: write label + value row
-    const wcRow = (rowNum: number, label: string, value: string) => {
-      ws.mergeCells(`B${rowNum}:G${rowNum}`)
-      const lbl = ws.getCell(`B${rowNum}`)
-      lbl.value = label
-      lbl.fill  = blueFill
-      lbl.font  = navyFont
-      lbl.alignment = { horizontal: 'left', vertical: 'middle' }
-      lbl.border = borders
-
-      ws.mergeCells(`H${rowNum}:X${rowNum}`)
-      const val = ws.getCell(`H${rowNum}`)
-      val.value = value
-      val.border = borders
-      val.alignment = { wrapText: true, vertical: 'top' }
-      ws.getRow(rowNum).height = 18
-    }
-
-    // Check mark indicators for type row
-    const TYPES = ['사무실(구미 숙소) 복귀', '재택근무 전환', '추가 외근 수행', '업무 종료']
-    const typeStr = TYPES.map(t => (t === wc.type ? `☑ ${t}` : `☐ ${t}`)).join('   ')
-
-    wcRow(35, '근무 형태', typeStr)
-    wcRow(36, '전환 사유', wc.reason ?? '')
-    wcRow(37, '수행 업무', wc.detail ?? '')
-    wcRow(38, '수행 시간', wc.time_log ?? '')
-  }
-
-  return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
-}
-
 // ── Date serial helper ────────────────────────────────────────
 // Excel date serial = days since Dec 30, 1899 (1900 leap-year bug accounted for).
 function dateToSerial(dateStr: string | null | undefined): number | null {
@@ -261,10 +137,104 @@ function dateToSerial(dateStr: string | null | undefined): number | null {
   return Math.floor(d.getTime() / 86400000) + 25569 + 1
 }
 
-// ── Gantt task row XML (inline-string, no sharedStrings dependency) ──
-// Style indices match Gantt Chart.xlsx rows 12 (Plan) and 13 (Action),
-// verified by XML inspection of references/Gantt Chart.xlsx.
-function generateGanttTaskRowsXml(tasks: GanttTask[]): string {
+// ── LGD AP3-based Installation Export ────────────────────────
+// Uses references/LGD AP3_installation report.xlsx as the single base
+// workbook.  Sheet1 (Gantt Chart) is updated in-place; one date sheet
+// is cloned per document report (reusing LGD AP3's sheet2+).  All
+// drawings, charts, styles, and shared-strings remain untouched so
+// Excel opens without repair prompts.
+
+/** Extract column-letter → style-index map from a <row> XML fragment. */
+function extractRowStyles(rowXml: string): Record<string, number> {
+  const styles: Record<string, number> = {}
+  for (const m of rowXml.matchAll(/<c r="([A-Z]+)\d+"[^>]*\bs="(\d+)"/g)) {
+    styles[m[1]] = parseInt(m[2])
+  }
+  return styles
+}
+
+/**
+ * Replace a cell's value with an inline string.
+ * Uses indexOf-based splitting (avoids regex template-literal escape issues).
+ * Preserves the s= (style) attribute so visual formatting survives.
+ */
+function patchCellStr(xml: string, ref: string, value: string): string {
+  const openTag = `<c r="${ref}"`
+  const idx = xml.indexOf(openTag)
+  if (idx < 0) return xml
+
+  const tagEnd = xml.indexOf('>', idx)
+  if (tagEnd < 0) return xml
+
+  const isSelfClose = xml[tagEnd - 1] === '/'
+  const rawAttrs = isSelfClose
+    ? xml.slice(idx + openTag.length, tagEnd - 1)
+    : xml.slice(idx + openTag.length, tagEnd)
+  const cleanAttrs = rawAttrs
+    .replace(/\s*\bt="[^"]*"/g, '')
+    .replace(/\s*\bcm="[^"]*"/g, '')
+
+  const replacement = !value.trim()
+    ? `<c r="${ref}"${cleanAttrs}/>`
+    : `<c r="${ref}"${cleanAttrs} t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`
+
+  if (isSelfClose) {
+    return xml.slice(0, idx) + replacement + xml.slice(tagEnd + 1)
+  }
+  const closeIdx = xml.indexOf('</c>', tagEnd)
+  if (closeIdx < 0) return xml
+  return xml.slice(0, idx) + replacement + xml.slice(closeIdx + 4)
+}
+
+/**
+ * Replace a cell's value with a plain number, clearing any formula.
+ * Preserves the s= (style) attribute.
+ */
+function patchCellNum(xml: string, ref: string, value: number): string {
+  const openTag = `<c r="${ref}"`
+  const idx = xml.indexOf(openTag)
+  if (idx < 0) return xml
+
+  const tagEnd = xml.indexOf('>', idx)
+  if (tagEnd < 0) return xml
+
+  const isSelfClose = xml[tagEnd - 1] === '/'
+  const rawAttrs = isSelfClose
+    ? xml.slice(idx + openTag.length, tagEnd - 1)
+    : xml.slice(idx + openTag.length, tagEnd)
+  const cleanAttrs = rawAttrs
+    .replace(/\s*\bt="[^"]*"/g, '')
+    .replace(/\s*\bcm="[^"]*"/g, '')
+
+  const replacement = `<c r="${ref}"${cleanAttrs}><v>${value}</v></c>`
+
+  if (isSelfClose) {
+    return xml.slice(0, idx) + replacement + xml.slice(tagEnd + 1)
+  }
+  const closeIdx = xml.indexOf('</c>', tagEnd)
+  if (closeIdx < 0) return xml
+  return xml.slice(0, idx) + replacement + xml.slice(closeIdx + 4)
+}
+
+/**
+ * Strip date-sheet XML of hyperlinks and vmlDrawing tags (comments layer).
+ * The drawing rId2 reference (radar chart) is intentionally preserved.
+ */
+function cleanDateSheetXml(xml: string): string {
+  xml = xml.replace(/<hyperlinks>[\s\S]*?<\/hyperlinks>/g, '')
+  xml = xml.replace(/<legacyDrawing\s[^>]*\/>/g, '')
+  return xml
+}
+
+/** Generate Gantt Plan+Action row pairs for LGD AP3's style table. */
+function generateGanttTaskRowsXmlLGD(
+  tasks: GanttTask[],
+  planStyles:   Record<string, number>,
+  actionStyles: Record<string, number>,
+): string {
+  const ps  = (col: string, fb: number) => planStyles[col]   ?? fb
+  const asc = (col: string, fb: number) => actionStyles[col] ?? fb
+
   const iStr = (col: string, row: number, s: number, val: string | null | undefined) => {
     const v = (val ?? '').trim()
     if (!v) return `<c r="${col}${row}" s="${s}"/>`
@@ -283,444 +253,245 @@ function generateGanttTaskRowsXml(tasks: GanttTask[]): string {
     const actStart  = dateToSerial(task.start_date)
     const actEnd    = dateToSerial(task.complete_date)
     const no        = task.no != null ? Number(task.no) : null
+    const pr = rn, ar = rn + 1
 
-    const pr = rn       // plan row
-    const ar = rn + 1   // action row
-
-    // Status: computed from action row actual dates
     const statusVal = actEnd ? 'Completed' : actStart ? 'Started' : 'Planned'
-    const statusFml = `_xlfn.IFS($K${ar}&lt;&gt;"","Completed",$J${ar}&lt;&gt;"","Started",$J${ar}="","Planned")`
     const durFml    = `IF($K${ar}&lt;&gt;"",$K${ar}-$J${ar}+1,"")`
 
-    // Plan row ─ styles: A=51 B=52 C=53 D=54 E=55 F=52 G=56 H=61 I=45 J=46 K=46
     rows.push(
       `<row r="${pr}" spans="1:87" ht="15" customHeight="1" thickTop="1" x14ac:dyDescent="0.25">` +
-      numC('A', pr, 51, no) +
-      iStr('B', pr, 52, task.action) +
-      iStr('C', pr, 53, task.category) +
-      iStr('D', pr, 54, task.item) +
-      `<c r="E${pr}" s="55"/>` +
-      iStr('F', pr, 52, task.remark) +
-      `<c r="G${pr}" s="56" t="str" cm="1"><f t="array" ref="G${pr}">${statusFml}</f><v>${escapeXml(statusVal)}</v></c>` +
-      (task.plan_duration != null ? `<c r="H${pr}" s="61"><v>${task.plan_duration}</v></c>` : `<c r="H${pr}" s="61"/>`) +
-      iStr('I', pr, 45, 'Plan') +
-      numC('J', pr, 46, planStart) +
-      numC('K', pr, 46, planEnd) +
-      `</row>`
+      numC('A', pr, ps('A', 51), no) +
+      iStr('B', pr, ps('B', 52), task.action) +
+      iStr('C', pr, ps('C', 53), task.category) +
+      iStr('D', pr, ps('D', 54), task.item) +
+      `<c r="E${pr}" s="${ps('E', 55)}"/>` +
+      iStr('F', pr, ps('F', 52), task.remark) +
+      iStr('G', pr, ps('G', 56), statusVal) +
+      (task.plan_duration != null
+        ? `<c r="H${pr}" s="${ps('H', 61)}"><v>${task.plan_duration}</v></c>`
+        : `<c r="H${pr}" s="${ps('H', 61)}"/>`) +
+      iStr('I', pr, ps('I', 45), 'Plan') +
+      numC('J', pr, ps('J', 46), planStart) +
+      numC('K', pr, ps('K', 46), planEnd) +
+      `</row>`,
     )
-
-    // Action row ─ styles: A=64 B=65 C=52 D=66 E=67 F=65 G=68 H=69 I=47 J=47 K=48
     rows.push(
       `<row r="${ar}" spans="1:87" ht="15" customHeight="1" thickBot="1" x14ac:dyDescent="0.3">` +
-      `<c r="A${ar}" s="64"/>` +
-      `<c r="B${ar}" s="65"/>` +
-      `<c r="C${ar}" s="52"/>` +
-      `<c r="D${ar}" s="66"/>` +
-      `<c r="E${ar}" s="67"/>` +
-      `<c r="F${ar}" s="65"/>` +
-      `<c r="G${ar}" s="68"/>` +
-      `<c r="H${ar}" s="69"><f>${durFml}</f><v>${task.duration ?? ''}</v></c>` +
-      iStr('I', ar, 47, 'Action') +
-      numC('J', ar, 47, actStart) +
-      numC('K', ar, 48, actEnd) +
-      `</row>`
+      `<c r="A${ar}" s="${asc('A', 64)}"/>` +
+      `<c r="B${ar}" s="${asc('B', 65)}"/>` +
+      `<c r="C${ar}" s="${asc('C', 52)}"/>` +
+      `<c r="D${ar}" s="${asc('D', 66)}"/>` +
+      `<c r="E${ar}" s="${asc('E', 67)}"/>` +
+      `<c r="F${ar}" s="${asc('F', 65)}"/>` +
+      iStr('G', ar, asc('G', 68), 'Action') +
+      `<c r="H${ar}" s="${asc('H', 69)}"><f>${durFml}</f><v>${task.duration ?? ''}</v></c>` +
+      iStr('I', ar, asc('I', 47), 'Action') +
+      numC('J', ar, asc('J', 47), actStart) +
+      numC('K', ar, asc('K', 48), actEnd) +
+      `</row>`,
     )
-
     rn += 2
   }
-
   return rows.join('\n')
 }
 
-// ── Build Gantt sheet from Gantt Chart.xlsx template (JSZip) ──
-// Loads references/Gantt Chart.xlsx, clears task rows 12+, injects
-// new rows from `tasks`, and returns a Buffer.  The template preserves
-// timeline header formulas, progress-summary formulas (D3:D7), and
-// the conditional-formatting rules that draw the Gantt timeline bars.
-async function buildGanttFromTemplate(tasks: GanttTask[]): Promise<Buffer> {
-  const tplPath = path.join(process.cwd(), 'references', 'Gantt Chart.xlsx')
-  if (!fs.existsSync(tplPath)) {
-    // Fallback: ExcelJS plain sheet (no timeline bars)
-    return generateGanttSheetBuffer(tasks, 'Gantt Chart')
+/** Apply InstallationContent values into a cloned LGD AP3 date sheet XML. */
+function applyInstallationContentToSheet(
+  xml: string,
+  content: InstallationContent,
+  ganttTasks: GanttTask[],
+  reportDate: string,
+): string {
+  const ps = (v: string | null | undefined) => (v ?? '').trim()
+
+  xml = patchCellStr(xml, 'V3',  ps(content.fse_name))
+  xml = patchCellStr(xml, 'V4',  ps(content.report_date ?? reportDate))
+  xml = patchCellStr(xml, 'C7',  ps(content.customer))
+  xml = patchCellStr(xml, 'C8',  ps(content.model))
+  xml = patchCellStr(xml, 'C9',  ps(content.sid))
+  xml = patchCellStr(xml, 'C10', ps(content.eq_id))
+  xml = patchCellStr(xml, 'L7',  ps(content.location))
+  xml = patchCellStr(xml, 'L8',  ps(content.site_survey))
+  xml = patchCellStr(xml, 'O8',  ps(content.noise_level))
+  xml = patchCellStr(xml, 'L9',  ps(content.start_date))
+  xml = patchCellStr(xml, 'L10', ps(content.est_complete_date))
+  xml = patchCellStr(xml, 'T7',  ps(content.crm_case_id))
+  xml = patchCellStr(xml, 'T8',  ps(content.main_user))
+  xml = patchCellStr(xml, 'T9',  ps(content.tel))
+  xml = patchCellStr(xml, 'T10', ps(content.email))
+  xml = patchCellStr(xml, 'C11', ps(content.service_type))
+  xml = patchCellStr(xml, 'L11', ps(content.start_time))
+  xml = patchCellStr(xml, 'T11', ps(content.end_time))
+  xml = patchCellStr(xml, 'B18', ps(content.critical_item_summary))
+  xml = patchCellStr(xml, 'O28', ps(content.next_plan))
+  xml = patchCellStr(xml, 'C33', ps(content.data_location))
+
+  // Detail report rows (B28, B29, …)
+  const details = content.detail_report ?? []
+  for (let i = 0; i < 10; i++) {
+    const text = i < details.length
+      ? (details[i].title
+          ? `${details[i].title}: ${details[i].content ?? ''}`
+          : (details[i].content ?? ''))
+      : ''
+    xml = patchCellStr(xml, `B${28 + i}`, text)
   }
 
-  const zip = await JSZip.loadAsync(fs.readFileSync(tplPath))
+  // Progress (0-1 decimal — cells are formatted as %)
+  let committedPct = (content.committed_pct ?? 0) / 100
+  let actualPct    = (content.actual_pct    ?? 0) / 100
+  let totalDays    = content.total_days    ?? 0
+  let progressDays = content.progress_days ?? 0
 
-  let sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('text') ?? ''
+  if (ganttTasks.length > 0) {
+    const cp = computeInstallationProgress(
+      ganttTasks, content.start_date, content.est_complete_date, reportDate,
+    )
+    committedPct = cp.committedProgress / 100
+    actualPct    = cp.actualProgress    / 100
+    totalDays    = cp.totalDays
+    progressDays = cp.progressDays
+  }
 
-  // Remove task rows (12+) keeping header rows 1-11 intact
-  const closeTag = '</sheetData>'
-  const closeIdx = sheetXml.indexOf(closeTag)
-  const beforeClose = sheetXml.slice(0, closeIdx)
-  const afterClose  = sheetXml.slice(closeIdx)           // starts with </sheetData>
+  xml = patchCellNum(xml, 'D15', committedPct)
+  xml = patchCellNum(xml, 'P15', totalDays)
+  xml = patchCellNum(xml, 'D16', actualPct)
+  xml = patchCellNum(xml, 'P16', progressDays)
 
-  const row12Idx = beforeClose.search(/<row\s+r="12"[\s>]/)
-  const headerPart = row12Idx >= 0 ? beforeClose.slice(0, row12Idx) : beforeClose
+  return xml
+}
 
-  sheetXml = headerPart + generateGanttTaskRowsXml(tasks) + afterClose
-  zip.file('xl/worksheets/sheet1.xml', sheetXml)
+/**
+ * Build the final installation xlsx from LGD AP3 as the base workbook.
+ *
+ * Strategy:
+ *  • Load LGD AP3 with JSZip (preserves all drawings/charts/styles/sharedStrings)
+ *  • Patch sheet1.xml (Gantt Chart): clear rows 12+, inject new task rows,
+ *    update D3:D7 with computed progress values
+ *  • Clone sheet2.xml (first date sheet) as template for each document
+ *  • Write sheet2, sheet3, … with patched cell values (inline strings)
+ *  • Update workbook.xml <sheets> and workbook.xml.rels to reference only
+ *    the Gantt Chart sheet + the new date sheets
+ *  • [Content_Types].xml needs no changes — all sheetN.xml files are already
+ *    registered in LGD AP3's content types
+ */
+async function buildInstallationXlsxFromLGDAP3(
+  ganttTasks: GanttTask[],
+  documents: Array<{ content: InstallationContent; reportDate: string; tabName: string }>,
+): Promise<Buffer> {
+  const lgdPath = path.join(process.cwd(), 'references', 'LGD AP3_installation report.xlsx')
+  if (!fs.existsSync(lgdPath)) throw new Error('LGD AP3 base template not found: ' + lgdPath)
 
-  // Strip any external defined names that would cause broken refs
-  let wbXml = await zip.file('xl/workbook.xml')?.async('text') ?? ''
-  wbXml = wbXml.replace(/<definedName\b[^>]*>[^<]*\[\d+\][^<]*<\/definedName>/g, '')
+  const zip = await JSZip.loadAsync(fs.readFileSync(lgdPath))
+
+  let wbXml  = await zip.file('xl/workbook.xml')?.async('text') ?? ''
+  let wbRels = await zip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
+
+  // ── Parse sheet registry ──────────────────────────────────
+  const sheets: Array<{ name: string; rId: string; file: string }> = []
+  for (const m of wbXml.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)) {
+    const [, name, rId] = m
+    const target = wbRels.match(new RegExp(`Id="${rId}"[^>]*Target="([^"]+)"`))?.[1] ?? ''
+    const file = target.startsWith('xl/') ? target : `xl/${target}`
+    sheets.push({ name, rId, file })
+  }
+
+  const ganttSheet  = sheets.find(s => s.name === 'Gantt Chart')
+  const dateSheetTpl = sheets.find(s => s.name !== 'Gantt Chart')
+  if (!ganttSheet)   throw new Error('LGD AP3 workbook missing "Gantt Chart" sheet')
+  if (!dateSheetTpl) throw new Error('LGD AP3 workbook has no date sheet template')
+
+  // ── 1. Update Gantt Chart sheet ───────────────────────────
+  let ganttXml = await zip.file(ganttSheet.file)?.async('text') ?? ''
+
+  // Extract style indices from existing plan/action template rows
+  const planRowMatch   = ganttXml.match(/<row\s[^>]*r="12"[^>]*>[\s\S]*?<\/row>/)
+  const actionRowMatch = ganttXml.match(/<row\s[^>]*r="13"[^>]*>[\s\S]*?<\/row>/)
+  const planStyles     = planRowMatch   ? extractRowStyles(planRowMatch[0])   : {}
+  const actionStyles   = actionRowMatch ? extractRowStyles(actionRowMatch[0]) : {}
+
+  // Strip existing task rows (12+) from sheetData
+  const sdClose  = '</sheetData>'
+  const sdCloseI = ganttXml.indexOf(sdClose)
+  const beforeSD = ganttXml.slice(0, sdCloseI)
+  const afterSD  = ganttXml.slice(sdCloseI)
+  const row12I   = beforeSD.search(/<row\s[^>]*r="12"/)
+  let   headerPart = row12I >= 0 ? beforeSD.slice(0, row12I) : beforeSD
+
+  // Patch D3:D7 with computed progress (overrides formula-cached values so
+  // the radar chart shows real percentages without Excel recalculation)
+  const progressData = getProgress(ganttTasks)
+  for (let i = 0; i < GANTT_CATEGORIES.length; i++) {
+    const cp  = progressData.categories[GANTT_CATEGORIES[i]]
+    const pct = cp && cp.total > 0 ? Math.round(cp.pct * 10000) / 10000 : 0
+    headerPart = patchCellNum(headerPart, `D${3 + i}`, pct)
+  }
+
+  ganttXml = headerPart + generateGanttTaskRowsXmlLGD(ganttTasks, planStyles, actionStyles) + afterSD
+  zip.file(ganttSheet.file, ganttXml)
+
+  // ── 2. Get date sheet template XML ────────────────────────
+  const dateTplRaw   = await zip.file(dateSheetTpl.file)?.async('text') ?? ''
+  const dateTplClean = cleanDateSheetXml(dateTplRaw)
+
+  // Build minimal rels for cloned date sheets: only the radar-chart drawing
+  const dateTplNum    = dateSheetTpl.file.match(/sheet(\d+)\.xml$/)?.[1] ?? '2'
+  const existingRels  = await zip.file(`xl/worksheets/_rels/sheet${dateTplNum}.xml.rels`)?.async('text') ?? ''
+  // Match only the chart-drawing relationship (not vmlDrawing which is for comments)
+  const drawingRelRaw = existingRels.match(/<Relationship[^>]*Type="[^"]*\/drawing"[^>]*\/>/)
+  const minimalRels   = [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    drawingRelRaw
+      ? drawingRelRaw[0]
+      : '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>',
+    '</Relationships>',
+  ].join('\n')
+
+  // ── 3. Write date sheets ──────────────────────────────────
+  const ganttFileNum  = parseInt(ganttSheet.file.match(/sheet(\d+)\.xml$/)?.[1] ?? '1')
+  const sheetEntries  = [`<sheet name="Gantt Chart" sheetId="1" r:id="rWsGantt"/>`]
+  const relEntries    = [
+    `<Relationship Id="rWsGantt" ` +
+    `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ` +
+    `Target="worksheets/sheet${ganttFileNum}.xml"/>`,
+  ]
+
+  for (let i = 0; i < documents.length; i++) {
+    const { content, reportDate, tabName } = documents[i]
+    const sheetNum = ganttFileNum + 1 + i
+    const rId      = `rWsDate${i + 1}`
+
+    const patched = applyInstallationContentToSheet(dateTplClean, content, ganttTasks, reportDate)
+    zip.file(`xl/worksheets/sheet${sheetNum}.xml`, patched)
+    zip.file(`xl/worksheets/_rels/sheet${sheetNum}.xml.rels`, minimalRels)
+
+    sheetEntries.push(`<sheet name="${escapeXml(tabName)}" sheetId="${i + 2}" r:id="${rId}"/>`)
+    relEntries.push(
+      `<Relationship Id="${rId}" ` +
+      `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ` +
+      `Target="worksheets/sheet${sheetNum}.xml"/>`,
+    )
+  }
+
+  // ── 4. Update workbook.xml ────────────────────────────────
+  wbXml = wbXml
+    .replace(/<sheets>[\s\S]*?<\/sheets>/, `<sheets>${sheetEntries.join('')}</sheets>`)
+    .replace(/<definedNames>[\s\S]*?<\/definedNames>/g, '')
+    .replace(/<externalReferences>[\s\S]*?<\/externalReferences>/g, '')
   zip.file('xl/workbook.xml', wbXml)
+
+  // ── 5. Update workbook.xml.rels ───────────────────────────
+  wbRels = wbRels
+    .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
+    .replace(/<Relationship\b[^>]*\bType="[^"]*\/externalLink"[^>]*\/>/g, '')
+    .replace('</Relationships>', relEntries.join('') + '</Relationships>')
+  zip.file('xl/_rels/workbook.xml.rels', wbRels)
 
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
 }
 
-// ── Shared-strings → inline-strings conversion ────────────────
-// Date-sheet XML cells carry t="s" references into the date-sheet's
-// own sharedStrings.xml.  When the sheet XML is transplanted into the
-// combined workbook (which uses Gantt Chart.xlsx's sharedStrings), the
-// indices no longer map correctly.  Converting all t="s" cells to
-// t="inlineStr" removes the shared-string dependency entirely.
-async function inlineSharedStrings(dateBuf: Buffer): Promise<string> {
-  const zip = await JSZip.loadAsync(dateBuf)
-
-  const ssXml    = await zip.file('xl/sharedStrings.xml')?.async('text') ?? ''
-  let   sheetXml = await zip.file('xl/worksheets/sheet1.xml')?.async('text') ?? ''
-
-  // Build index → text lookup (handles plain <t> and rich-text <r><t>)
-  const strings: string[] = []
-  for (const m of ssXml.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
-    const texts: string[] = []
-    for (const t of m[1].matchAll(/<t(?:\s[^>]*)?>([^<]*)<\/t>/g)) texts.push(t[1])
-    strings.push(
-      texts.join('')
-        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"').replace(/&apos;/g, "'"),
-    )
-  }
-
-  if (strings.length === 0) return sheetXml   // nothing to convert
-
-  sheetXml = sheetXml.replace(
-    /<c(\s[^>]*?)\bt="s"\b([^>]*)>([\s\S]*?)<\/c>/g,
-    (_full, a1, a2, inner) => {
-      const vMatch = inner.match(/<v>(\d+)<\/v>/)
-      if (!vMatch) return _full
-      const str = strings[parseInt(vMatch[1])] ?? ''
-      const attrs = (a1 + a2).replace(/\s+/g, ' ').trim()
-      if (!str) return `<c ${attrs}/>`
-      return `<c ${attrs} t="inlineStr"><is><t>${escapeXml(str)}</t></is></c>`
-    },
-  )
-
-  return sheetXml
-}
-
-// ── Gantt Chart sheet builder (ExcelJS fallback) ──────────────
-// Used when references/Gantt Chart.xlsx is missing.
-async function generateGanttSheetBuffer(tasks: GanttTask[], tabName: string): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet(tabName)
-
-  const NAVY    = '1F3864'
-  const BLUE    = '4472C4'
-  const WHITE   = 'FFFFFF'
-  const GREEN_B = 'D1FAE5'
-  const BLUE_B  = 'DBEAFE'
-  const GRAY_L  = 'F9FAFB'
-  const GRAY_H  = 'E5E7EB'
-
-  const whiteFont  = { bold: true, color: { argb: `FF${WHITE}` } }
-  const navyFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${NAVY}` } }
-  const blueFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${BLUE}` } }
-  const grayHFill  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${GRAY_H}` } }
-  const thinBorder = { style: 'thin' as const }
-  const allBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
-
-  // ── Row 1: Title bar ─────────────────────────────────────────
-  ws.mergeCells('A1:K1')
-  const titleCell = ws.getCell('A1')
-  titleCell.value = 'Gantt Chart'
-  titleCell.font  = { bold: true, size: 14, color: { argb: `FF${WHITE}` } }
-  titleCell.fill  = navyFill
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
-  ws.getRow(1).height = 22
-
-  // ── Row 2: Progress summary headers ──────────────────────────
-  // NOTE: leave A2 blank (template has completed count formula there)
-  ws.getCell('B2').value = 'Action'
-  ws.getCell('C2').value = 'Total Case#'
-  ws.getCell('D2').value = 'Progress %'
-  ;['B2','C2','D2'].forEach(addr => {
-    const c = ws.getCell(addr)
-    c.font   = whiteFont
-    c.fill   = blueFill
-    c.border = allBorders
-    c.alignment = { horizontal: 'center', vertical: 'middle' }
-  })
-  ws.getRow(2).height = 15
-
-  // ── Rows 3-7: Progress summary data ──────────────────────────
-  // Chart references: 'Gantt Chart'!$B$3:$B$7 (names), $D$3:$D$7 (pct 0-1)
-  const progress = getProgress(tasks)
-  GANTT_CATEGORIES.forEach((cat, idx) => {
-    const rowNum = 3 + idx
-    const cp = progress.categories[cat]
-    const completed = cp?.completed ?? 0
-    const total     = cp?.total ?? 0
-    const pctVal    = total > 0 ? cp!.pct : 0   // 0-1 decimal for chart reference
-
-    const rA = ws.getCell(`A${rowNum}`)
-    rA.value  = completed
-    rA.border = allBorders
-    rA.alignment = { horizontal: 'center' }
-
-    const rB = ws.getCell(`B${rowNum}`)
-    rB.value  = cat
-    rB.border = allBorders
-    rB.fill   = idx % 2 === 0 ? grayHFill : { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${GRAY_L}` } }
-
-    const rC = ws.getCell(`C${rowNum}`)
-    rC.value  = total
-    rC.border = allBorders
-    rC.alignment = { horizontal: 'center' }
-
-    const rD = ws.getCell(`D${rowNum}`)
-    rD.value      = pctVal               // 0-1 decimal — chart reads this
-    rD.numFmt     = '0%'
-    rD.border     = allBorders
-    rD.alignment  = { horizontal: 'center' }
-  })
-
-  // ── Row 8: TOTAL summary row ──────────────────────────────────
-  ws.getCell('A8').value = progress.completed
-  ws.getCell('B8').value = 'TOTAL'
-  ws.getCell('C8').value = progress.total
-  ws.getCell('D8').value = progress.total > 0 ? progress.totalPct : 0
-  ws.getCell('D8').numFmt = '0%'
-  ;['A8','B8','C8','D8'].forEach(addr => {
-    ws.getCell(addr).border = allBorders
-    ws.getCell(addr).font   = { bold: true }
-    ws.getCell(addr).fill   = grayHFill
-  })
-  ws.getRow(8).height = 15
-
-  // ── Row 9: empty spacer ──────────────────────────────────────
-  ws.getRow(9).height = 6
-
-  // ── Row 10: Task table headers ────────────────────────────────
-  const taskHeaders = ['No', 'Action', 'Category', 'Item', 'Remark', 'Status', 'Duration', 'Plan/Action', 'Start Date', 'Complete Date']
-  const hRow = ws.getRow(10)
-  taskHeaders.forEach((h, ci) => {
-    const cell = hRow.getCell(ci + 1)  // A=1, B=2, ...
-    cell.value  = h
-    cell.font   = whiteFont
-    cell.fill   = blueFill
-    cell.border = allBorders
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-  })
-  hRow.height = 20
-
-  // ── Rows 12+: Two rows per task (Plan + Action) ───────────────
-  let rowCursor = 12
-
-  tasks.forEach(task => {
-    const statusBg = task.status === 'Completed' ? { argb: `FF${GREEN_B}` }
-                   : task.status === 'Started'   ? { argb: `FF${BLUE_B}`  }
-                   : null
-    const taskFill = statusBg
-      ? { type: 'pattern' as const, pattern: 'solid' as const, fgColor: statusBg }
-      : null
-
-    // Plan row
-    const planRow = ws.getRow(rowCursor)
-    const planVals = [
-      task.no,
-      task.action      ?? '',
-      task.category    ?? '',
-      task.item        ?? '',
-      task.remark      ?? '',
-      task.status      ?? '',
-      task.plan_duration != null ? task.plan_duration : '',
-      'Plan',
-      task.plan_start_date    ?? '',
-      task.plan_complete_date ?? '',
-    ]
-    planVals.forEach((v, ci) => {
-      const cell = planRow.getCell(ci + 1)
-      cell.value  = v
-      cell.border = allBorders
-      if (taskFill) cell.fill = taskFill
-    })
-    planRow.height = 16
-
-    // Action row
-    const actRow = ws.getRow(rowCursor + 1)
-    const actVals = [
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      task.duration != null ? task.duration : '',
-      'Action',
-      task.start_date    ?? '',
-      task.complete_date ?? '',
-    ]
-    actVals.forEach((v, ci) => {
-      const cell = actRow.getCell(ci + 1)
-      cell.value  = v
-      cell.border = allBorders
-      if (taskFill) cell.fill = taskFill
-    })
-    actRow.height = 16
-
-    rowCursor += 2
-  })
-
-  // ── Column widths (matches template) ─────────────────────────
-  ws.getColumn(1).width  = 5   // No
-  ws.getColumn(2).width  = 21  // Action
-  ws.getColumn(3).width  = 16  // Category
-  ws.getColumn(4).width  = 26  // Item
-  ws.getColumn(5).width  = 22  // Remark
-  ws.getColumn(6).width  = 13  // Status
-  ws.getColumn(7).width  = 10  // Duration
-  ws.getColumn(8).width  = 10  // Plan/Action
-  ws.getColumn(9).width  = 13  // Start Date
-  ws.getColumn(10).width = 13  // Complete Date
-
-  return removeExternalDefinedNames(Buffer.from(await wb.xlsx.writeBuffer()))
-}
-
-// ── Installation multi-sheet combiner (preserves drawings) ────
-// Strategy:
-//   Sheet 1 = ganttBuf (from Gantt Chart.xlsx JSZip — has timeline bars)
-//   Sheets 2+ = dateBufs (ExcelJS round-trip of Park Systems template)
-//
-// ExcelJS strips chart/drawing files during round-trip, so we load the
-// ORIGINAL Park Systems template (instTemplatePath) with JSZip to obtain the
-// actual drawing1.xml, chart1.xml etc.  Chart data refs '[1]Gantt Chart'
-// (external workbook) are rewritten to 'Gantt Chart' (internal sheet).
-//
-// Date-sheet cells use shared-string indices from the ExcelJS buffer's own
-// sharedStrings.xml.  Since that table is incompatible with the Gantt
-// Chart.xlsx sharedStrings in the base ZIP, we convert every t="s" cell to
-// t="inlineStr" so the text is self-contained.
-async function combineInstallationSheets(
-  ganttBuf:         Buffer,
-  dateBufs:         Buffer[],
-  tabNames:         string[],        // [0]='Gantt Chart', [1..]= date tabs
-  instTemplatePath: string,          // path to Park Systems Installation template
-): Promise<Buffer> {
-  const baseZip    = await JSZip.loadAsync(ganttBuf)
-  const baseWbXml  = await baseZip.file('xl/workbook.xml')?.async('text') ?? ''
-  const baseWbRels = await baseZip.file('xl/_rels/workbook.xml.rels')?.async('text') ?? ''
-  const baseCT     = await baseZip.file('[Content_Types].xml')?.async('text') ?? ''
-
-  const sheetEntries: string[] = []
-  const wsRelEntries: string[] = []
-  const ctAddEntries: string[] = []
-
-  // ── Sheet 1: Gantt Chart (already in baseZip as sheet1.xml) ──
-  sheetEntries.push(`<sheet name="${escapeXml(tabNames[0])}" sheetId="1" r:id="wsId1"/>`)
-  wsRelEntries.push(
-    `<Relationship Id="wsId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`,
-  )
-
-  // ── Load the original Park Systems template to get drawing/chart files ──
-  // ExcelJS strips these during round-trip, so we must source them directly
-  // from the unmodified template file.
-  const tplZip = await JSZip.loadAsync(fs.readFileSync(instTemplatePath))
-
-  // Collect chart/drawing file paths that exist in the original template
-  const tplDrawingPaths = Object.keys(tplZip.files).filter(
-    p => !tplZip.files[p].dir && (p.startsWith('xl/drawings/') || p.startsWith('xl/charts/')),
-  )
-
-  // Determine the drawing relationship ID used by the template's sheet1 rels
-  const tplSheetRels = await tplZip.file('xl/worksheets/_rels/sheet1.xml.rels')?.async('text') ?? ''
-
-  // Ensure drawing tag is present in date-sheet XML.
-  // ExcelJS may strip <drawing> but we need it for every date sheet.
-  // Extract r:id from the template's sheet rels if present.
-  const drawingRelMatch = tplSheetRels.match(
-    /Id="([^"]+)"[^>]*Type="[^"]*\/drawing"[^>]*Target="([^"]+)"/,
-  )
-  const drawingRelId = drawingRelMatch?.[1] ?? 'rId1'
-
-  // Copy chart/drawing files from ORIGINAL template (once for all date sheets)
-  for (const relPath of tplDrawingPaths) {
-    const entry = tplZip.files[relPath]
-    if (relPath.startsWith('xl/charts/') && relPath.endsWith('.xml') && !relPath.includes('_rels')) {
-      // Fix external workbook refs: '[1]Gantt Chart'!... → 'Gantt Chart'!...
-      let xml = await entry.async('text')
-      xml = xml.replace(/'\[(\d+)\]([^']+)'/g, "'$2'")
-      baseZip.file(relPath, xml)
-    } else {
-      baseZip.file(relPath, await entry.async('uint8array'))
-    }
-  }
-
-  // Harvest Content-Type overrides for the drawing/chart files
-  const tplCT = await tplZip.file('[Content_Types].xml')?.async('text') ?? ''
-  for (const m of tplCT.matchAll(/<Override\s[^>]*PartName="([^"]+)"[^>]*\/>/g)) {
-    const partName = m[1]
-    if (
-      (partName.startsWith('/xl/drawings/') || partName.startsWith('/xl/charts/')) &&
-      !baseCT.includes(partName)
-    ) {
-      ctAddEntries.push(m[0])
-    }
-  }
-
-  // ── Sheets 2+: one per date report ──────────────────────────
-  // Build a fixed sheet rels string that every date sheet will use.
-  // It points to the same drawing1.xml that all date sheets share.
-  const sharedDrawingRels = tplSheetRels.trim()
-
-  for (let i = 0; i < dateBufs.length; i++) {
-    const n = i + 2
-
-    // Convert shared-string refs → inline strings (indices are incompatible
-    // between ExcelJS buffer sharedStrings and Gantt Chart.xlsx sharedStrings)
-    let sheetXml = await inlineSharedStrings(dateBufs[i])
-
-    // Ensure <drawing r:id="..."/> is present so Excel renders the chart.
-    // ExcelJS may have preserved or stripped it.  Inject if missing.
-    if (!sheetXml.includes('<drawing ') && drawingRelMatch) {
-      sheetXml = sheetXml.replace(
-        '</worksheet>',
-        `<drawing r:id="${drawingRelId}"/></worksheet>`,
-      )
-    }
-
-    baseZip.file(`xl/worksheets/sheet${n}.xml`, sheetXml)
-
-    // Every date sheet shares the same drawing rels (pointing to drawing1.xml)
-    if (sharedDrawingRels) {
-      baseZip.file(`xl/worksheets/_rels/sheet${n}.xml.rels`, sharedDrawingRels)
-    }
-
-    ctAddEntries.push(
-      `<Override PartName="/xl/worksheets/sheet${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
-    )
-    sheetEntries.push(`<sheet name="${escapeXml(tabNames[i + 1])}" sheetId="${n}" r:id="wsId${n}"/>`)
-    wsRelEntries.push(
-      `<Relationship Id="wsId${n}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${n}.xml"/>`,
-    )
-  }
-
-  baseZip.file('xl/workbook.xml', baseWbXml.replace(
-    /<sheets>[\s\S]*?<\/sheets>/,
-    `<sheets>${sheetEntries.join('')}</sheets>`,
-  ))
-  baseZip.file('xl/_rels/workbook.xml.rels', baseWbRels
-    .replace(/<Relationship\b[^>]*\bType="[^"]*\/worksheet"[^>]*\/>/g, '')
-    .replace('</Relationships>', `${wsRelEntries.join('')}</Relationships>`),
-  )
-  if (ctAddEntries.length > 0) {
-    baseZip.file('[Content_Types].xml', baseCT.replace('</Types>', `${ctAddEntries.join('')}</Types>`))
-  }
-
-  return baseZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>
-}
-
-// ── Multi-sheet combiner (JSZip structural merge) ─────────────
+// ── Multi-sheet combiner (JSZip structural merge — field service) ──
 async function combineSheets(
   sheetBufs: Buffer[],
   tabNames: string[],
@@ -804,12 +575,10 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 
   // ── Installation export ────────────────────────────────────
   if (cardRow.type === 'installation') {
-    // Fetch gantt data
     const { data: ganttRow } = await supabaseAdmin
       .from('gantt').select('*').eq('card_id', cardId).single()
     const ganttTasks: GanttTask[] = (ganttRow?.payload?.tasks ?? []) as GanttTask[]
 
-    // Fetch all documents newest first
     const { data: docs } = await supabaseAdmin
       .from('documents').select('*')
       .eq('card_id', cardId).eq('is_external', false)
@@ -817,27 +586,13 @@ export async function GET(_req: NextRequest, { params }: { params: Params }) {
 
     if (!docs || docs.length === 0) return errRes('No internal reports found for this card', 404)
 
-    const instTemplatePath = path.join(process.cwd(), 'references', 'Park Systems Installation Passdown Report.xlsx')
-    if (!fs.existsSync(instTemplatePath)) return errRes('Installation Excel template not found on server', 500)
+    const documents = (docs as DocumentRow[]).map(docRow => ({
+      content:    normalizeInstallationContent(docRow.content) as InstallationContent,
+      reportDate: docRow.report_date,
+      tabName:    docRow.report_date.replace(/-/g, '.'),
+    }))
 
-    // Sheet 1: Gantt Chart — JSZip injection into Gantt Chart.xlsx template.
-    // Preserves timeline headers, progress-formula rows, and conditional
-    // formatting (Gantt bars).  Falls back to ExcelJS if template is missing.
-    const ganttBuf   = await buildGanttFromTemplate(ganttTasks)
-    const dateBufs:  Buffer[] = []
-    const dateTabNames: string[] = []
-
-    // Sheets 2+: one per document, newest first (Excel template round-trip — preserves drawings)
-    for (const docRow of docs as DocumentRow[]) {
-      const content = normalizeInstallationContent(docRow.content) as InstallationContent
-      const tabName = docRow.report_date.replace(/-/g, '.')
-      dateBufs.push(await generateInstallationSheetBuffer(
-        instTemplatePath, content, tabName, ganttTasks, docRow.report_date,
-      ))
-      dateTabNames.push(tabName)
-    }
-
-    const buf = await combineInstallationSheets(ganttBuf, dateBufs, ['Gantt Chart', ...dateTabNames], instTemplatePath)
+    const buf = await buildInstallationXlsxFromLGDAP3(ganttTasks, documents)
     const seg = (s: string) => (s ?? '').replace(/[/\\:*?"<>|]/g, '').trim()
     const filename = `${seg(cardRow.customer)}_${seg(cardRow.eq_id)}_installation-reports.xlsx`
 

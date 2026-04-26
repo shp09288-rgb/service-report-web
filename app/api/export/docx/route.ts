@@ -122,6 +122,7 @@ export async function POST(req: NextRequest) {
         },
       })
     } catch (e) {
+      console.error('[docx/installation] export error:', e instanceof Error ? e.stack : e)
       const msg = e instanceof Error ? e.message : 'Template export failed'
       return err(msg, 500)
     }
